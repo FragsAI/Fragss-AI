@@ -1,10 +1,18 @@
 import cv2
-import tkinter as tk
-from tkinter import filedialog, messagebox
-from functools import partial
 import os
 import numpy as np
 import moviepy.editor as mp
+import librosa
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset
+from torchvision import transforms, models
+from moviepy.editor import VideoFileClip, concatenate_videoclips
+import json
+from tkinter import filedialog, messagebox
+import tkinter as tk
+from functools import partial
 
 class VideoSegmentationTool:
     def __init__(self, root):
@@ -94,6 +102,68 @@ class VideoSegmentationTool:
         """
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
             self.root.destroy()
+
+
+def load_yolo_model():
+    net = cv2.dnn.readNet("yolov3.weights", "yolov3.cfg")
+    with open("coco.names", "r") as f:
+        classes = [line.strip() for line in f.readlines()]
+    layer_names = net.getLayerNames()
+    output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
+    return net, classes, output_layers
+
+def yolo_object_detection(input_video_path, output_video_path):
+    net, classes, output_layers = load_yolo_model()
+    cap = cv2.VideoCapture(input_video_path)
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    out = cv2.VideoWriter(output_video_path, fourcc, 30.0, (int(cap.get(3)), int(cap.get(4))))
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        height, width, channels = frame.shape
+        blob = cv2.dnn.blobFromImage(frame, 0.00392, (416, 416), (0, 0, 0), True, crop=False)
+        net.setInput(blob)
+        outs = net.forward(output_layers)
+
+        class_ids = []
+        confidences = []
+        boxes = []
+
+        for out in outs:
+            for detection in out:
+                scores = detection[5:]
+                class_id = np.argmax(scores)
+                confidence = scores[class_id]
+                if confidence > 0.5:
+                    center_x = int(detection[0] * width)
+                    center_y = int(detection[1] * height)
+                    w = int(detection[2] * width)
+                    h = int(detection[3] * height)
+                    x = int(center_x - w / 2)
+                    y = int(center_y - h / 2)
+                    boxes.append([x, y, w, h])
+                    confidences.append(float(confidence))
+                    class_ids.append(class_id)
+
+        indexes = cv2.dnn.NMSBoxes(boxes, confidences, 0.5, 0.4)
+        font = cv2.FONT_HERSHEY_PLAIN
+        for i in range(len(boxes)):
+            if i in indexes:
+                x, y, w, h = boxes[i]
+                label = str(classes[class_ids[i]])
+                color = (0, 255, 0)
+                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+                cv2.putText(frame, label, (x, y + 30), font, 2, color, 2)
+
+        out.write(frame)
+
+    cap.release()
+    out.release()
+    cv2.destroyAllWindows()
+
 
 def shot_boundary_detection(video_path, threshold=100):
     """
@@ -259,6 +329,114 @@ def combine_video_audio(video_dir, audio_dir, output_dir):
         # Remove both video and audio clips
         os.remove(video_path)
         os.remove(audio_path)
+
+def detect_audio_events(video_path, threshold=0.02):
+    video = mp.VideoFileClip(video_path)
+    audio_path = "temp_audio.wav"
+    video.audio.write_audiofile(audio_path)
+    
+    y, sr = librosa.load(audio_path)
+    audio_events = []
+
+    onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+    onset_frames = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
+
+    for frame in onset_frames:
+        event_time = librosa.frames_to_time(frame, sr=sr)
+        audio_events.append(event_time * 1000)  # Convert to milliseconds
+
+    os.remove(audio_path)
+    return audio_events
+
+class VideoActionDataset(Dataset):
+    def __init__(self, video_files, labels, transform=None):
+        self.video_files = video_files
+        self.labels = labels
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.video_files)
+
+    def __getitem__(self, idx):
+        video = mp.VideoFileClip(self.video_files[idx])
+        frames = [frame for frame in video.iter_frames()]
+        label = self.labels[idx]
+        if self.transform:
+            frames = [self.transform(frame) for frame in frames]
+        frames = np.stack(frames)
+        frames = torch.tensor(frames).permute(3, 0, 1, 2)  # Move channels to front
+        return frames, label
+
+def train_action_recognition_model(data_dir):
+    video_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.mp4')]
+    labels_file = os.path.join(data_dir, 'labels.json')
+    with open(labels_file, 'r') as f:
+        labels = json.load(f)
+    
+    # Transform and DataLoader
+    transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((112, 112)),
+        transforms.ToTensor()
+    ])
+    
+    dataset = VideoActionDataset(video_files, labels, transform)
+    dataloader = DataLoader(dataset, batch_size=2, shuffle=True)
+    
+    # Model
+    model = models.video.r3d_18(pretrained=True)
+    model.fc = nn.Linear(model.fc.in_features, len(set(labels.values())))
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    
+    # Training Loop
+    num_epochs = 10
+    for epoch in range(num_epochs):
+        model.train()
+        running_loss = 0.0
+        for inputs, labels in dataloader:
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+        
+        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss/len(dataloader)}")
+    
+    torch.save(model.state_dict(), os.path.join(data_dir, 'action_model.pth'))
+
+def infer_and_label(data_dir):
+    video_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.mp4')]
+    labels_file = os.path.join(data_dir, 'labels.json')
+    with open(labels_file, 'r') as f:
+        labels = json.load(f)
+    
+    model = models.video.r3d_18(pretrained=True)
+    model.fc = nn.Linear(model.fc.in_features, len(set(labels.values())))
+    model.load_state_dict(torch.load(os.path.join(data_dir, 'action_model.pth')))
+    model.eval()
+    
+    transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((112, 112)),
+        transforms.ToTensor()
+    ])
+    
+    for video_file in video_files:
+        video = mp.VideoFileClip(video_file)
+        frames = [frame for frame in video.iter_frames()]
+        frames = [transform(frame) for frame in frames]
+        frames = np.stack(frames)
+        frames = torch.tensor(frames).permute(3, 0, 1, 2)  # Move channels to front
+        with torch.no_grad():
+            output = model(frames.unsqueeze(0))
+            _, predicted = torch.max(output, 1)
+        
+        action = labels[str(predicted.item())]
+        labeled_clip = video.subclip(0, 10).set_duration(video.duration).set_text(action, fontsize=50, color='white', bg_color='black', text_position=('center', 'top'))
+        labeled_clip.write_videofile(os.path.join(data_dir, f"labeled_{os.path.basename(video_file)}"), codec='libx264', audio_codec='aac')
+
 
 if __name__ == "__main__":
     root = tk.Tk()
