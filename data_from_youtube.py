@@ -34,7 +34,6 @@ minecraft_info = {
     'duration':[],
     'views':[],
     'likes':[],
-    'favorites':[],
     'comments':[]
 }
 # Dictionary to store valorant video data
@@ -43,7 +42,6 @@ valorant_info = {
     'duration':[],
     'views':[],
     'likes':[],
-    'favorites':[],
     'comments':[]
 }
 # For loop to obtain the information of each minecraft video
@@ -57,20 +55,16 @@ for item in minecraft_videos_ids['items']:
         fields="items(statistics," + \
                      "contentDetails(duration))"
     ).execute()
-    # We will only consider videos which contains all properties we need.
-    # If a property is missing, then it will not appear as dictionary key,
-    # this is why we need a try/catch block
+    
     try:
         duration = r['items'][0]['contentDetails']['duration']
         views = r['items'][0]['statistics']['viewCount']
         likes = r['items'][0]['statistics']['likeCount']
-        favorites = r['items'][0]['statistics']['favoriteCount']
         comments = r['items'][0]['statistics']['commentCount']
         minecraft_info['id'].append(vidId)
         minecraft_info['duration'].append(duration)
         minecraft_info['views'].append(views)
         minecraft_info['likes'].append(likes)
-        minecraft_info['favorites'].append(favorites)
         minecraft_info['comments'].append(comments)
     except:
         pass
@@ -87,13 +81,11 @@ for item in valorant_videos_ids['items']:
         duration = r['items'][0]['contentDetails']['duration']
         views = r['items'][0]['statistics']['viewCount']
         likes = r['items'][0]['statistics']['likeCount']
-        favorites = r['items'][0]['statistics']['favoriteCount']
         comments = r['items'][0]['statistics']['commentCount']
         valorant_info['id'].append(vidId)
         valorant_info['duration'].append(duration)
         valorant_info['views'].append(views)
         valorant_info['likes'].append(likes)
-        valorant_info['favorites'].append(favorites)
         valorant_info['comments'].append(comments)
     except:
         pass
