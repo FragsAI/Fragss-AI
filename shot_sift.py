@@ -1,115 +1,142 @@
 import cv2
 import numpy as np
-import os
+import logging
+from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
 
-def extract_sift_features(frame):
-    sift = cv2.SIFT_create()
-    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    keypoints, descriptors = sift.detectAndCompute(gray_frame, None)
-    return keypoints, descriptors
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def extract_surf_features(frame):
-    surf = cv2.SURF_create()
-    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    keypoints, descriptors = surf.detectAndCompute(gray_frame, None)
-    return keypoints, descriptors
-
-def preprocess_frame(frame, resize_dim):
-    # Resize the frame
-    resized_frame = cv2.resize(frame, resize_dim)
-    
-    # Normalize the frame
-    normalized_frame = cv2.normalize(resized_frame, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-    
-    return normalized_frame
-
-def main(video_path, output_dir, resize_dim=(640, 480), step_size=2):
+def extract_frames_multithreaded(video_path, num_threads=4):
     cap = cv2.VideoCapture(video_path)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
-    if not cap.isOpened():
-        print("Error: Could not open video.")
-        return
-    
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_width = resize_dim[0]
-    frame_height = resize_dim[1]
-    
-    prev_descriptors = None
-    scene_changes = []
-    frame_number = 0
-    min_frames_between_changes = int(3 * fps)  # Minimum frames corresponding to 3 seconds
-    
-    # List to store the preprocessed frames
-    preprocessed_frames = []
-    original_frames = []
-    
-    while True:
+    def process_frame(frame_index):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ret, frame = cap.read()
-        if not ret:
-            break
-
-        if frame_number % step_size != 0:
-            frame_number += 1
-            continue
-
-        # Preprocess the frame (includes resizing and normalization)
-        preprocessed_frame = preprocess_frame(frame, resize_dim)
-        preprocessed_frames.append(preprocessed_frame)  # Store the preprocessed (resized and normalized) frame
-        original_frames.append(frame)  # Store the original frame for final video writing
-        
-        # Extract SIFT features for the current frame
-        _, curr_descriptors = extract_sift_features(preprocessed_frame)
-        
-        if prev_descriptors is not None:
-            # Match SIFT features between current and previous frames
-            bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
-            matches = bf.match(prev_descriptors, curr_descriptors)
-            matches = sorted(matches, key=lambda x: x.distance)
-            
-            # Calculate the difference based on the number of good matches
-            good_matches = [m for m in matches if m.distance < 0.75 * np.mean([m.distance for m in matches])]
-            feature_diff = len(good_matches) / max(len(prev_descriptors), len(curr_descriptors))
-            
-            # If the feature difference is below a threshold, consider it a scene change
-            if feature_diff < 0.1:  # Adjust this threshold based on your requirements
-                if not scene_changes or (frame_number - scene_changes[-1] >= min_frames_between_changes):
-                    scene_changes.append(frame_number)
-                
-        prev_descriptors = curr_descriptors
-        frame_number += 1
-        
+        if ret:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            return frame_index, gray
+        return frame_index, None
+    
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = [executor.submit(process_frame, i) for i in range(total_frames)]
+        frames = {i: f.result()[1] for i, f in enumerate(futures) if f.result()[1] is not None}
+    
     cap.release()
-    
-    # Adding the end frame number
-    scene_changes.append(frame_number)
-    
-    print("Scene changes detected at frames:", scene_changes)
-    
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    
-    current_scene = 0
-    start_frame = 0
+    return frames
 
-    for i, change_frame in enumerate(scene_changes):
-        out = cv2.VideoWriter(
-            os.path.join(output_dir, f'scene_{current_scene}.mp4'),
-            cv2.VideoWriter_fourcc(*'mp4v'),
-            fps,
-            (frame_width, frame_height)
-        )
-        
-        for frame_idx in range(start_frame, change_frame):
-            if frame_idx < len(original_frames):
-                out.write(original_frames[frame_idx])
-        
-        out.release()
-        current_scene += 1
-        start_frame = change_frame
+def calculate_histogram_difference(frame1, frame2):
+    hist1 = cv2.calcHist([frame1], [0], None, [256], [0, 256])
+    hist2 = cv2.calcHist([frame2], [0], None, [256], [0, 256])
+    cv2.normalize(hist1, hist1)
+    cv2.normalize(hist2, hist2)
+    return cv2.compareHist(hist1, hist2, cv2.HISTCMP_CORREL)
+
+def detect_shot_boundaries(video_path, method='sift', diff_threshold=50000, match_threshold=0.7, num_threads=4):
+    """
+    Detects shot boundaries in a video using either SIFT or frame differencing.
+
+    Args:
+        video_path (str): Path to the video file.
+        method (str): Method for shot detection ('sift' or 'diff').
+        diff_threshold (int): Threshold for frame differencing method.
+        match_threshold (float): Threshold for SIFT method.
+        num_threads (int): Number of threads to use for frame extraction.
     
-    print("Video segmentation completed. Segments saved in:", output_dir)
+    Returns:
+        list: List of frame indices where shot boundaries were detected.
+    """
+    frames = extract_frames_multithreaded(video_path, num_threads=num_threads)
+    if method == 'sift':
+        sift = cv2.SIFT_create()
+        bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
+
+    prev_frame = None
+    prev_des = None
+    shot_boundaries = []
+    
+    logging.info(f"Total frames in video: {len(frames)}")
+    
+    with tqdm(total=len(frames), desc="Detecting shot boundaries") as pbar:
+        for frame_index in sorted(frames.keys()):
+            gray = frames[frame_index]
+            
+            if method == 'diff':
+                if prev_frame is not None:
+                    diff = cv2.absdiff(prev_frame, gray)
+                    non_zero_count = np.count_nonzero(diff)
+                    
+                    if non_zero_count > diff_threshold:
+                        shot_boundaries.append(frame_index)
+                prev_frame = gray
+            
+            elif method == 'sift':
+                kp, des = sift.detectAndCompute(gray, None)
+                
+                if prev_des is not None:
+                    matches = bf.match(prev_des, des)
+                    distances = [m.distance for m in matches]
+                    
+                    if len(distances) > 0:
+                        avg_distance = sum(distances) / len(distances)
+                        if avg_distance > match_threshold:
+                            shot_boundaries.append(frame_index)
+                prev_des = des
+            
+            pbar.update(1)
+    
+    logging.info(f"Detected {len(shot_boundaries)} shot boundaries.")
+    return shot_boundaries
+
+def refine_shot_boundaries(video_path, initial_boundaries, threshold=0.5):
+    """
+    Refines shot boundaries based on SIFT feature matching.
+
+    Args:
+        video_path (str): Path to the video file.
+        initial_boundaries (list): Initial list of shot boundaries.
+        threshold (float): Threshold for refining shot boundaries.
+    
+    Returns:
+        list: List of refined shot boundaries.
+    """
+    frames = extract_frames_multithreaded(video_path)
+    sift = cv2.SIFT_create()
+    bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
+    
+    refined_boundaries = []
+    prev_des = None
+    
+    for frame_index in sorted(frames.keys()):
+        gray = frames[frame_index]
+        kp, des = sift.detectAndCompute(gray, None)
+        
+        if prev_des is not None:
+            matches = bf.match(prev_des, des)
+            distances = [m.distance for m in matches]
+            
+            if len(distances) > 0:
+                avg_distance = sum(distances) / len(distances)
+                if avg_distance > threshold:
+                    if frame_index in initial_boundaries:
+                        refined_boundaries.append(frame_index)
+        
+        prev_des = des
+    
+    return refined_boundaries
+
+def main():
+    video_path = "input_video.mp4"
+    method = 'sift'  # Can be 'diff' for frame differencing or 'sift' for SIFT-based detection
+    
+    logging.info("Starting initial shot boundary detection")
+    initial_boundaries = detect_shot_boundaries(video_path, method=method)
+    
+    logging.info("Starting shot boundary refinement")
+    refined_boundaries = refine_shot_boundaries(video_path, initial_boundaries)
+    
+    print("Detected shot boundaries at frames:", refined_boundaries)
 
 if __name__ == "__main__":
-    video_path = "C:\Users\paras\OneDrive\Documents\Frags AI Code\cod.mp4"  # Replace with your video file path
-    output_dir = "./rand2"  # Replace with your desired output directory
-    main(video_path, output_dir)
+    main()

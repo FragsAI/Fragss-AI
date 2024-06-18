@@ -1,101 +1,129 @@
 import cv2
 import numpy as np
 import os
+import logging
 import random
-from concurrent.futures import ThreadPoolExecutor
+from skimage.util import random_noise
 from tqdm import tqdm
 
-def extract_frames(video_path, output_dir, resize_dim=(224, 224), normalize=False):
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def extract_frames(video_path, output_folder, frame_rate=1):
     """
-    Extract frames from a video, resize them, and normalize pixel values.
+    Extracts frames from a video and saves them as JPEG files.
 
-    Parameters:
-    - video_path: Path to the video file.
-    - output_dir: Directory where extracted frames will be saved.
-    - resize_dim: Tuple specifying the size to resize frames to (width, height).
-    - normalize: Boolean indicating whether to normalize pixel values to the range [0, 1].
-
-    Returns:
-    - frame_paths: List of paths to the extracted frame images.
+    Args:
+        video_path (str): Path to the video file.
+        output_folder (str): Directory to save the extracted frames.
+        frame_rate (int): Interval of frames to extract (e.g., 1 for every frame, 5 for every 5th frame).
     """
-    os.makedirs(output_dir, exist_ok=True)
-    cap = cv2.VideoCapture(video_path)
-
-    if not cap.isOpened():
-        raise ValueError(f"Error opening video file {video_path}")
-
-    frame_paths = []
-    frame_count = 0
-    tot_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    progress_bar = tqdm(total=tot_frames, desc="Extracting frames")
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        frame = cv2.resize(frame, resize_dim)
-
-        if normalize:
-            frame = frame / 255.0 
-            ## Here we won't reap the benefits of normalization until we do further calculations using the normalized image
-
-        frame_filename = os.path.join(output_dir, f"frame_{frame_count:04d}.jpg")
-        cv2.imwrite(frame_filename, frame * 255 if normalize else frame)
-        frame_paths.append(frame_filename)
-
-        frame_count += 1
-        progress_bar.update(1)
-
-    cap.release()
-    progress_bar.close()
-    return frame_paths
+    try:
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+        
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            logging.error(f"Error opening video file: {video_path}")
+            return
+        
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        logging.info(f"Total frames in video: {frame_count}")
+        
+        extracted_frames = 0
+        with tqdm(total=frame_count // frame_rate, desc="Extracting frames") as pbar:
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                
+                if cap.get(cv2.CAP_PROP_POS_FRAMES) % frame_rate == 0:
+                    frame_path = os.path.join(output_folder, f"frame_{extracted_frames:06d}.jpg")
+                    cv2.imwrite(frame_path, frame)
+                    extracted_frames += 1
+                    pbar.update(1)
+        
+        cap.release()
+        cv2.destroyAllWindows()
+        logging.info(f"Extracted {extracted_frames} frames.")
+    
+    except Exception as e:
+        logging.error(f"An error occurred during frame extraction: {e}")
 
 def augment_frame(frame):
-    aug_choice = random.choice(['rotate', 'flip', 'brightness'])
+    """
+    Apply random transformations to augment the frame.
 
-    if aug_choice == 'rotate':
-        angle = random.uniform(-15, 15)
-        h, w = frame.shape[:2]
-        M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1)
-        augmented_frame = cv2.warpAffine(frame, M, (w, h))
-        
-    elif aug_choice == 'flip':
-        flip_code = random.choice([-1, 0, 1])
-        augmented_frame = cv2.flip(frame, flip_code)
-        
-    elif aug_choice == 'brightness':
-        value = random.randint(-50, 50)
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        h, s, v = cv2.split(hsv)
-        v = cv2.add(v, value)
-        v[v > 255] = 255
-        v[v < 0] = 0
-        final_hsv = cv2.merge((h, s, v))
-        augmented_frame = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2BGR)
-        
-    return augmented_frame
+    Args:
+        frame (numpy.ndarray): Frame to augment.
+    
+    Returns:
+        numpy.ndarray: Augmented frame.
+    """
+    if random.choice([True, False]):
+        frame = cv2.flip(frame, 1)  # Horizontal flip
+    
+    if random.choice([True, False]):
+        frame = cv2.GaussianBlur(frame, (5, 5), 0)  # Gaussian blur
+    
+    if random.choice([True, False]):
+        frame = random_noise(frame, mode='speckle')  # Add speckle noise
+        frame = np.array(255 * frame, dtype='uint8')
+    
+    return frame
 
-def process_frame(frame_path, augmented_output_dir):
-    frame = cv2.imread(frame_path)
-    augmented_frame = augment_frame(frame)
-    frame_filename = os.path.basename(frame_path)
-    augmented_frame_path = os.path.join(augmented_output_dir, frame_filename)
-    cv2.imwrite(augmented_frame_path, augmented_frame)
+def preprocess_frames(input_folder, output_file, resize_dim=(224, 224), augment=False):
+    """
+    Preprocesses extracted frames by resizing and normalizing them, and saves as a numpy array.
+
+    Args:
+        input_folder (str): Directory containing the extracted frames.
+        output_file (str): Path to save the preprocessed frames numpy array.
+        resize_dim (tuple): Dimensions to resize frames to.
+        augment (bool): Whether to apply augmentation to the frames.
+    """
+    try:
+        frames = []
+        frame_files = sorted([f for f in os.listdir(input_folder) if f.endswith(".jpg")])
+        total_frames = len(frame_files)
+        logging.info(f"Total frames to preprocess: {total_frames}")
+
+        with tqdm(total=total_frames, desc="Preprocessing frames") as pbar:
+            for file_name in frame_files:
+                frame_path = os.path.join(input_folder, file_name)
+                frame = cv2.imread(frame_path)
+                if frame is None:
+                    logging.warning(f"Could not read frame: {frame_path}")
+                    continue
+                frame = cv2.resize(frame, resize_dim)
+                frame = frame.astype(np.float32) / 255.0
+                if augment:
+                    frame = augment_frame(frame)
+                frames.append(frame)
+                pbar.update(1)
+        
+        frames = np.array(frames)
+        np.save(output_file, frames)
+        logging.info(f"Preprocessed frames saved to {output_file}")
+    
+    except Exception as e:
+        logging.error(f"An error occurred during frame preprocessing: {e}")
 
 def main():
-    video_path = 'cod.mp4'
-    output_dir = 'extracted_frames'
-    resize_dim = (224, 224)
-
-    frame_paths = extract_frames(video_path, output_dir, resize_dim)
-    print(f"Extracted and processed {len(frame_paths)} frames.")
-
-    augmented_output_dir =  'augmented'
-    os.makedirs(augmented_output_dir, exist_ok=True)
-
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-        list(tqdm(executor.map(lambda frame_path: process_frame(frame_path, augmented_output_dir), frame_paths), total=len(frame_paths), desc="Augmenting frames"))
+    video_path = "input_video.mp4"
+    frames_folder = "frames"
+    output_file = "preprocessed_frames.npy"
+    
+    frame_rate = 5  # Extract every 5th frame
+    resize_dim = (224, 224)  # Resize dimensions for the frames
+    augment = True  # Apply augmentation to the frames
+    
+    logging.info("Starting frame extraction")
+    extract_frames(video_path, frames_folder, frame_rate)
+    
+    logging.info("Starting frame preprocessing")
+    preprocess_frames(frames_folder, output_file, resize_dim, augment)
 
 if __name__ == "__main__":
     main()
+
