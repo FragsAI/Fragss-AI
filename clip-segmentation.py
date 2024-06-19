@@ -1,267 +1,212 @@
 import cv2
-import tkinter as tk
-from tkinter import filedialog, messagebox
-from functools import partial
-import os
 import numpy as np
-import moviepy.editor as mp
+import os
+import logging
+import pickle
+from tqdm import tqdm
+from sklearn.model_selection import GridSearchCV
+from sklearn.svm import SVR
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from concurrent.futures import ThreadPoolExecutor
 
-class VideoSegmentationTool:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Video Segmentation Tool")
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-        self.video_path = None
-        self.output_dir = None
-
-        self.frame = tk.Frame(self.root)
-        self.frame.pack(padx=10, pady=10)
-
-        self.select_video_button = tk.Button(self.frame, text="Select Video", command=self.select_video)
-        self.select_video_button.grid(row=0, column=0, padx=5, pady=5)
-
-        self.select_output_button = tk.Button(self.frame, text="Select Output", command=self.select_output)
-        self.select_output_button.grid(row=0, column=1, padx=5, pady=5)
-
-        self.process_button = tk.Button(self.frame, text="Segment Video", command=self.segment_video, state=tk.DISABLED)
-        self.process_button.grid(row=0, column=2, padx=5, pady=5)
-
-        self.object_detection_var = tk.BooleanVar()
-        self.object_detection_check = tk.Checkbutton(self.frame, text="Object Detection", variable=self.object_detection_var)
-        self.object_detection_check.grid(row=1, column=0, padx=5, pady=5)
-
-        self.audio_event_var = tk.BooleanVar()
-        self.audio_event_check = tk.Checkbutton(self.frame, text="Audio Event Detection", variable=self.audio_event_var)
-        self.audio_event_check.grid(row=1, column=1, padx=5, pady=5)
-
-    def select_video(self):
-        try:
-            self.video_path = filedialog.askopenfilename(filetypes=[("Video files", "*.mp4;*.avi")])
-            if self.video_path:
-                self.process_button.config(state=tk.NORMAL)
-        except Exception as e:
-            messagebox.showerror("Error", f"An error occurred while selecting the video: {str(e)}")
-
-    def select_output(self):
-        try:
-            self.output_dir = filedialog.askdirectory()
-            if self.output_dir:
-                self.process_button.config(state=tk.NORMAL)
-        except Exception as e:
-            messagebox.showerror("Error", f"An error occurred while selecting the output directory: {str(e)}")
-
-    def segment_video(self):
-        if self.video_path and self.output_dir:
-            try:
-                self.detect_shot_boundaries()
-                self.generate_clips()
-                if self.audio_event_var.get():
-                    self.clip_audio()
-                self.combine_clips()
-                messagebox.showinfo("Success", "Video segmentation completed successfully.")
-            except Exception as e:
-                messagebox.showerror("Error", f"An error occurred: {str(e)}")
-        else:
-            messagebox.showerror("Error", "Please select both a video file and an output directory.")
-
-    def detect_shot_boundaries(self):
-        """
-        Detect shot boundaries in the input video using the shot_boundary_detection function.
-        """
-        self.shot_boundaries = shot_boundary_detection(self.video_path)
-
-    def generate_clips(self):
-        """
-        Generate video clips based on the detected shot boundaries.
-        """
-        clip_video(self.video_path, self.shot_boundaries, self.output_dir)
-
-    def clip_audio(self):
-        """
-        Generate audio clips based on the detected shot boundaries.
-        """
-        clip_audio(self.video_path, self.shot_boundaries, self.output_dir)
-
-    def combine_clips(self):
-        """
-        Combine the video and audio clips into the final output files.
-        """
-        combine_video_audio(self.output_dir, self.output_dir, self.output_dir)
-
-    def on_closing(self):
-        """
-        Handle the closing of the application window and prompt the user for confirmation.
-        """
-        if messagebox.askokcancel("Quit", "Do you want to quit?"):
-            self.root.destroy()
-
-def shot_boundary_detection(video_path, threshold=100):
-    """
-    Detect shot boundaries in a video based on histogram differences between frames.
-
-    Args:
-    - video_path (str): Path to the input video file.
-    - threshold (int): Threshold for detecting shot boundaries.
-
-    Returns:
-    - shot_boundaries (list): List of timestamps representing shot boundaries.
-    """
+def extract_frames_multithreaded(video_path, num_threads=4):
     cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print("Error: Couldn't open video file")
-        return []
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
-    # Initialize variables
-    prev_frame_hist = None
-    shot_boundaries = [0]
-    
-    while True:
+    def process_frame(frame_index):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ret, frame = cap.read()
-        if not ret:
-            break
-        
-        # Convert frame to grayscale
-        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        
-        # Calculate histogram
-        hist = cv2.calcHist([gray_frame], [0], None, [256], [0, 256])
-        
-        # Normalize histogram
-        cv2.normalize(hist, hist, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
-        
-        # Check if it's the first frame
-        if prev_frame_hist is None:
-            prev_frame_hist = hist
-            continue
-        
-        # Calculate histogram difference
-        hist_diff = cv2.compareHist(prev_frame_hist, hist, cv2.HISTCMP_BHATTACHARYYA)
-        
-        # If the difference is above the threshold, it indicates a shot boundary
-        if hist_diff > threshold:
-            shot_boundaries.append(cap.get(cv2.CAP_PROP_POS_MSEC))
-        
-        # Update previous frame histogram
-        prev_frame_hist = hist
+        if ret:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            return frame_index, gray
+        return frame_index, None
+    
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = [executor.submit(process_frame, i) for i in range(total_frames)]
+        frames = {i: f.result()[1] for i, f in enumerate(futures) if f.result()[1] is not None}
     
     cap.release()
-    
-    return shot_boundaries
+    return frames
 
-def clip_video(video_path, shot_boundaries, output_dir):
+def calculate_histogram_difference(frame1, frame2):
+    hist1 = cv2.calcHist([frame1], [0], None, [256], [0, 256])
+    hist2 = cv2.calcHist([frame2], [0], None, [256], [0, 256])
+    cv2.normalize(hist1, hist1)
+    cv2.normalize(hist2, hist2)
+    return cv2.compareHist(hist1, hist2, cv2.HISTCMP_CORREL)
+
+def detect_shot_boundaries(video_path, method='sift', diff_threshold=50000, match_threshold=0.7, hist_diff_threshold=0.5, num_threads=4):
     """
-    Clip the input video based on detected shot boundaries and save each segment as a separate file.
+    Detects shot boundaries in a video using SIFT, frame differencing, or histogram differences.
 
     Args:
-    - video_path (str): Path to the input video file.
-    - shot_boundaries (list): List of timestamps representing shot boundaries.
-    - output_dir (str): Directory to save the clipped video segments.
-    """
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print("Error: Couldn't open video file")
-        return
+        video_path (str): Path to the video file.
+        method (str): Method for shot detection ('sift', 'diff', 'hist').
+        diff_threshold (int): Threshold for frame differencing method.
+        match_threshold (float): Threshold for SIFT method.
+        hist_diff_threshold (float): Threshold for histogram difference method.
+        num_threads (int): Number of threads to use for frame extraction.
     
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    Returns:
+        list: List of frame indices where shot boundaries were detected.
+    """
+    frames = extract_frames_multithreaded(video_path, num_threads=num_threads)
+    if method == 'sift':
+        sift = cv2.SIFT_create()
+        bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
 
-    # Iterate over shot boundaries and create clips
-    for i, boundary in enumerate(shot_boundaries):
-        start_time = boundary / 1000  # convert milliseconds to seconds
-        end_time = (shot_boundaries[i + 1] / 1000)-0.1 if i < len(shot_boundaries) - 1 else None
+    prev_frame = None
+    prev_des = None
+    shot_boundaries = []
+    
+    logging.info(f"Total frames in video: {len(frames)}")
+    
+    with tqdm(total=len(frames), desc="Detecting shot boundaries") as pbar:
+        for frame_index in sorted(frames.keys()):
+            gray = frames[frame_index]
+            
+            if method == 'diff':
+                if prev_frame is not None:
+                    diff = cv2.absdiff(prev_frame, gray)
+                    non_zero_count = np.count_nonzero(diff)
+                    
+                    if non_zero_count > diff_threshold:
+                        shot_boundaries.append(frame_index)
+                prev_frame = gray
+            
+            elif method == 'sift':
+                kp, des = sift.detectAndCompute(gray, None)
+                
+                if prev_des is not None:
+                    matches = bf.match(prev_des, des)
+                    distances = [m.distance for m in matches]
+                    
+                    if len(distances) > 0:
+                        avg_distance = sum(distances) / len(distances)
+                        if avg_distance > match_threshold:
+                            shot_boundaries.append(frame_index)
+                prev_des = des
+            
+            elif method == 'hist':
+                if prev_frame is not None:
+                    hist_diff = calculate_histogram_difference(prev_frame, gray)
+                    if hist_diff < hist_diff_threshold:
+                        shot_boundaries.append(frame_index)
+                prev_frame = gray
+            
+            pbar.update(1)
+    
+    logging.info(f"Detected {len(shot_boundaries)} shot boundaries.")
+    return shot_boundaries
+
+def segment_clips(video_path, shot_boundaries, output_folder):
+    """
+    Segments a video into clips based on detected shot boundaries.
+
+    Args:
+        video_path (str): Path to the video file.
+        shot_boundaries (list): List of frame indices where shot boundaries were detected.
+        output_folder (str): Directory to save the segmented clips.
+    """
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    
+    cap = cv2.VideoCapture(video_path)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
+    shot_boundaries.append(total_frames)  # Ensure the last segment includes until the end of the video
+    
+    for i in range(len(shot_boundaries) - 1):
+        start_frame = shot_boundaries[i]
+        end_frame = shot_boundaries[i + 1]
         
-        # Set capture to start at the beginning of the clip
-        cap.set(cv2.CAP_PROP_POS_MSEC, start_time * 1000)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        clip_frames = []
         
-        # Initialize VideoWriter for the clip
-        clip_name = os.path.join(output_dir, f"clip_{i}.mp4")
-        out = cv2.VideoWriter(clip_name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
-        
-        # Read frames and write to the clip until the end time
-        while True:
+        while cap.get(cv2.CAP_PROP_POS_FRAMES) < end_frame:
             ret, frame = cap.read()
             if not ret:
                 break
-            
-            # Write frame to the clip
+            clip_frames.append(frame)
+        
+        output_clip_path = os.path.join(output_folder, f"clip_{i:03d}.mp4")
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_clip_path, fourcc, 30.0, (frame.shape[1], frame.shape[0]))
+        
+        for frame in clip_frames:
             out.write(frame)
-            
-            # Check if reached the end time of the clip
-            if end_time and cap.get(cv2.CAP_PROP_POS_MSEC) >= end_time * 1000:
-                break
         
-        # Release VideoWriter and move to the next clip
         out.release()
-
+    
     cap.release()
+    cv2.destroyAllWindows()
 
-def clip_audio(video_path, shot_boundaries, output_dir):
+def optimize_model(X, y):
     """
-    Clip the audio of the input video based on detected shot boundaries and save each segment as a separate file.
-
-    Args:
-    - video_path (str): Path to the input video file.
-    - shot_boundaries (list): List of timestamps representing shot boundaries.
-    - output_dir (str): Directory to save the clipped audio segments.
-    """
-    video = mp.VideoFileClip(video_path)
-    audio = video.audio
-    
-    # Iterate over shot boundaries and create audio clips
-    for i, boundary in enumerate(shot_boundaries):
-        start_time = boundary / 1000  # convert milliseconds to seconds
-        end_time = (shot_boundaries[i + 1] / 1000)-0.1 if i < len(shot_boundaries) - 1 else None
-        
-        # Clip the audio
-        audio_clip = audio.subclip(start_time, end_time)
-        
-        # Write audio clip to file
-        audio_clip.write_audiofile(os.path.join(output_dir, f"audio_clip_{i}.mp3"))
-
-def combine_video_audio(video_dir, audio_dir, output_dir):
-    """
-    Combine the clipped video and audio segments into final clips.
+    Optimizes a model using GridSearchCV.
 
     Args:
-    - video_dir (str): Directory containing the clipped video segments.
-    - audio_dir (str): Directory containing the clipped audio segments.
-    - output_dir (str): Directory to save the combined video clips.
+        X (numpy.ndarray): Feature matrix.
+        y (numpy.ndarray): Target vector.
+    
+    Returns:
+        estimator: Best estimator found by GridSearchCV.
     """
-    video_files = [f for f in os.listdir(video_dir) if f.endswith('.mp4')]
-    audio_files = [f for f in os.listdir(audio_dir) if f.endswith('.mp3')]
+    pipeline = make_pipeline(StandardScaler(), SVR())
+    param_grid = {
+        'svr__C': [0.1, 1, 10],
+        'svr__gamma': ['scale', 'auto'],
+        'svr__kernel': ['linear', 'rbf']
+    }
+    grid_search = GridSearchCV(pipeline, param_grid, cv=5, n_jobs=-1)
+    grid_search.fit(X, y)
+    return grid_search.best_estimator_
+
+def load_data(file_path):
+    """
+    Loads data from a file.
+
+    Args:
+        file_path (str): Path to the data file.
     
-    # Ensure equal number of video and audio clips
-    num_clips = min(len(video_files), len(audio_files))
+    Returns:
+        tuple: Feature matrix and target vector.
+    """
+    return np.load(file_path)
+
+def save_model(model, file_path):
+    """
+    Saves a model to a file.
+
+    Args:
+        model (estimator): Model to save.
+        file_path (str): Path to save the model file.
+    """
+    with open(file_path, 'wb') as f:
+        pickle.dump(model, f)
+
+def main():
+    video_path = "input_video.mp4"
+    output_folder = "clips"
     
-    for i in range(num_clips):
-        video_path = os.path.join(video_dir, f"clip_{i}.mp4")
-        audio_path = os.path.join(audio_dir, f"audio_clip_{i}.mp3")
-        
-        # Load video clip
-        video_clip = mp.VideoFileClip(video_path)
-        
-        try:
-            # Load audio clip
-            audio_clip = mp.AudioFileClip(audio_path)
-            
-            # Set audio for video clip
-            video_clip = video_clip.set_audio(audio_clip)
-            
-            # Write combined clip to file
-            combined_clip_path = os.path.join(output_dir, f"combined_clip_{i}.mp4")
-            video_clip.write_videofile(combined_clip_path, codec='libx264', audio_codec='aac')
-            
-            print(f"Combined clip {i} successfully created.")
-        except Exception as e:
-            print(f"Error combining audio and video for clip {i}: {e}")
-        
-        # Remove both video and audio clips
-        os.remove(video_path)
-        os.remove(audio_path)
+    logging.info("Starting shot boundary detection")
+    shot_boundaries = detect_shot_boundaries(video_path, method='sift')
+    
+    logging.info("Starting clip segmentation")
+    segment_clips(video_path, shot_boundaries, output_folder)
+    
+    logging.info("Starting model optimization")
+    data_file_path = "training_data.npy"
+    model_file_path = "optimized_model.pkl"
+    
+    X, y = load_data(data_file_path)
+    best_model = optimize_model(X, y)
+    save_model(best_model, model_file_path)
+    logging.info("Model optimized and saved")
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = VideoSegmentationTool(root)
-    root.protocol("WM_DELETE_WINDOW", app.on_closing)
-    root.mainloop()
+    main()
