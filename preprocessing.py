@@ -4,6 +4,7 @@ import os
 import logging
 import random
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
 from skimage.util import random_noise
 
 
@@ -35,11 +36,12 @@ def extract_frames(video_path, output_folder, frame_rate=1):
         missed_frames = 0
         tot_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         progress_bar = tqdm(total=tot_frames//frame_rate, desc="Extracting frames")
-
+        logging.info(f"Skipping every {frame_rate} frames")
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
+
 
             if int(cap.get(cv2.CAP_PROP_POS_FRAMES)) % frame_rate == 0:
                     frame_path = os.path.join(output_folder, f"frame_{extracted_frames:06d}.jpg")
@@ -102,44 +104,41 @@ def preprocess_frames(input_folder, output_file, resize_dim=(224, 224), augment=
         total_frames = len(frame_files)
         logging.info(f"Total frames to preprocess: {total_frames}")
 
-        missed_frames = 0
-        pbar = tqdm(total=total_frames, desc="Preprocessing frames")
-        for file_name in frame_files:
-            frame_path = os.path.join(input_folder, file_name)
-            frame = cv2.imread(frame_path)
-            if frame is None:
-                logging.warning(f"Could not read frame: {frame_path}")
-                missed_frames += 1
-                continue
-            frame = cv2.resize(frame, resize_dim)
-            frame = frame.astype(np.float32) / 255.0
-            if augment:
-                frame = augment_frame(frame)
-            frames.append(frame)
-            pbar.update(1)
+        with tqdm(total=total_frames, desc="Preprocessing frames") as pbar:
+            for file_name in frame_files:
+                frame_path = os.path.join(input_folder, file_name)
+                frame = cv2.imread(frame_path)
+                if frame is None:
+                    logging.warning(f"Could not read frame: {frame_path}")
+                    continue
+                frame = cv2.resize(frame, resize_dim)
+                frame = frame.astype(np.float32) / 255.0
+                if augment:
+                    frame = augment_frame(frame)
+                frames.append(frame)
+                pbar.update(1)
         
         frames = np.array(frames)
         np.save(output_file, frames)
-        logging.info(f"Preprocessed frames saved to {output_file}. Missed {missed_frames} frames.")
+        logging.info(f"Preprocessed frames saved to {output_file}")
     
     except Exception as e:
         logging.error(f"An error occurred during frame preprocessing: {e}")
 
+
 def main():
-    video_path = '/Users/kesinishivaram/FragsAI/Fragss-AI/cod.mp4'
+    video_path = 'your video path here'
     output_dir = 'extracted_frames'
     frame_rate = 5
-    resize_dim = (224, 224)
-    augment = False
 
     frame_paths = extract_frames(video_path, output_dir, frame_rate=frame_rate)
     print(f"Extracted and processed {len(frame_paths)} frames.")
 
     augmented_output_dir =  'augmented'
     os.makedirs(augmented_output_dir, exist_ok=True)
-    input_folder = '/Users/kesinishivaram/FragsAI/extracted_frames'
-
-    preprocess_frames(input_folder, augmented_output_dir, resize_dim = resize_dim, augment = augment)
+    
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        list(tqdm(executor.map(lambda frame_path: preprocess_frames(frame_path, augmented_output_dir), frame_paths), total=len(frame_paths), desc="Augmenting frames"))
 
 if __name__ == "__main__":
     main()
