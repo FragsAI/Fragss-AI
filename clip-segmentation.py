@@ -8,11 +8,22 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms, models
-from moviepy.editor import VideoFileClip, concatenate_videoclips
+from moviepy.editor import VideoFileClip
 import json
 from tkinter import filedialog, messagebox
 import tkinter as tk
+import logging
+import pickle
+from tqdm import tqdm
+from sklearn.model_selection import GridSearchCV
+from sklearn.svm import SVR
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class VideoSegmentationTool:
     def __init__(self, root):
@@ -73,36 +84,20 @@ class VideoSegmentationTool:
             messagebox.showerror("Error", "Please select both a video file and an output directory.")
 
     def detect_shot_boundaries(self):
-        """
-        Detect shot boundaries in the input video using the shot_boundary_detection function.
-        """
-        self.shot_boundaries = shot_boundary_detection(self.video_path)
+        self.shot_boundaries = detect_shot_boundaries(self.video_path, method='sift')
 
     def generate_clips(self):
-        """
-        Generate video clips based on the detected shot boundaries.
-        """
-        clip_video(self.video_path, self.shot_boundaries, self.output_dir)
+        segment_clips(self.video_path, self.shot_boundaries, self.output_dir)
 
     def clip_audio(self):
-        """
-        Generate audio clips based on the detected shot boundaries.
-        """
         clip_audio(self.video_path, self.shot_boundaries, self.output_dir)
 
     def combine_clips(self):
-        """
-        Combine the video and audio clips into the final output files.
-        """
         combine_video_audio(self.output_dir, self.output_dir, self.output_dir)
 
     def on_closing(self):
-        """
-        Handle the closing of the application window and prompt the user for confirmation.
-        """
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
             self.root.destroy()
-
 
 def load_yolo_model():
     net = cv2.dnn.readNet("yolov3.weights", "yolov3.cfg")
@@ -164,282 +159,153 @@ def yolo_object_detection(input_video_path, output_video_path):
     out.release()
     cv2.destroyAllWindows()
 
-
-def shot_boundary_detection(video_path, threshold=100):
-    """
-    Detect shot boundaries in a video based on histogram differences between frames.
-
-    Args:
-    - video_path (str): Path to the input video file.
-    - threshold (int): Threshold for detecting shot boundaries.
-
-    Returns:
-    - shot_boundaries (list): List of timestamps representing shot boundaries.
-    """
+def extract_frames_multithreaded(video_path, num_threads=4):
     cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print("Error: Couldn't open video file")
-        return []
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
-    # Initialize variables
-    prev_frame_hist = None
-    shot_boundaries = [0]
-    
-    while True:
+    def process_frame(frame_index):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ret, frame = cap.read()
-        if not ret:
-            break
-        
-        # Convert frame to grayscale
-        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        
-        # Calculate histogram
-        hist = cv2.calcHist([gray_frame], [0], None, [256], [0, 256])
-        
-        # Normalize histogram
-        cv2.normalize(hist, hist, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
-        
-        # Check if it's the first frame
-        if prev_frame_hist is None:
-            prev_frame_hist = hist
-            continue
-        
-        # Calculate histogram difference
-        hist_diff = cv2.compareHist(prev_frame_hist, hist, cv2.HISTCMP_BHATTACHARYYA)
-        
-        # If the difference is above the threshold, it indicates a shot boundary
-        if hist_diff > threshold:
-            shot_boundaries.append(cap.get(cv2.CAP_PROP_POS_MSEC))
-        
-        # Update previous frame histogram
-        prev_frame_hist = hist
+        if ret:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            return frame_index, gray
+        return frame_index, None
+    
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = [executor.submit(process_frame, i) for i in range(total_frames)]
+        frames = {i: f.result()[1] for i, f in enumerate(futures) if f.result()[1] is not None}
     
     cap.release()
+    return frames
+
+def calculate_histogram_difference(frame1, frame2):
+    hist1 = cv2.calcHist([frame1], [0], None, [256], [0, 256])
+    hist2 = cv2.calcHist([frame2], [0], None, [256], [0, 256])
+    cv2.normalize(hist1, hist1)
+    cv2.normalize(hist2, hist2)
+    return cv2.compareHist(hist1, hist2, cv2.HISTCMP_CORREL)
+
+def detect_shot_boundaries(video_path, method='sift', diff_threshold=50000, match_threshold=0.7, hist_diff_threshold=0.5, num_threads=4):
+    frames = extract_frames_multithreaded(video_path, num_threads=num_threads)
+    if method == 'sift':
+        sift = cv2.SIFT_create()
+        bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
+
+    prev_frame = None
+    prev_des = None
+    shot_boundaries = []
     
+    logging.info(f"Total frames in video: {len(frames)}")
+    
+    with tqdm(total=len(frames), desc="Detecting shot boundaries") as pbar:
+        for frame_index in sorted(frames.keys()):
+            gray = frames[frame_index]
+            
+            if method == 'diff':
+                if prev_frame is not None:
+                    diff = cv2.absdiff(prev_frame, gray)
+                    non_zero_count = np.count_nonzero(diff)
+                    
+                    if non_zero_count > diff_threshold:
+                        shot_boundaries.append(frame_index)
+                prev_frame = gray
+            
+            elif method == 'sift':
+                kp, des = sift.detectAndCompute(gray, None)
+                
+                if prev_des is not None:
+                    matches = bf.match(prev_des, des)
+                    distances = [m.distance for m in matches]
+                    
+                    if len(distances) > 0:
+                        avg_distance = sum(distances) / len(distances)
+                        if avg_distance > match_threshold:
+                            shot_boundaries.append(frame_index)
+                prev_des = des
+            
+            elif method == 'hist':
+                if prev_frame is not None:
+                    hist_diff = calculate_histogram_difference(prev_frame, gray)
+                    if hist_diff < hist_diff_threshold:
+                        shot_boundaries.append(frame_index)
+                prev_frame = gray
+            
+            pbar.update(1)
+    
+    logging.info(f"Detected {len(shot_boundaries)} shot boundaries.")
     return shot_boundaries
 
-def clip_video(video_path, shot_boundaries, output_dir):
-    """
-    Clip the input video based on detected shot boundaries and save each segment as a separate file.
-
-    Args:
-    - video_path (str): Path to the input video file.
-    - shot_boundaries (list): List of timestamps representing shot boundaries.
-    - output_dir (str): Directory to save the clipped video segments.
-    """
+def segment_clips(video_path, shot_boundaries, output_dir):
+    video_filename = os.path.splitext(os.path.basename(video_path))[0]
     cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print("Error: Couldn't open video file")
-        return
-    
     fps = cap.get(cv2.CAP_PROP_FPS)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    # Iterate over shot boundaries and create clips
-    for i, boundary in enumerate(shot_boundaries):
-        start_time = boundary / 1000  # convert milliseconds to seconds
-        end_time = (shot_boundaries[i + 1] / 1000)-0.1 if i < len(shot_boundaries) - 1 else None
+    
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    for i, boundary in enumerate(shot_boundaries[:-1]):
+        start_frame = boundary
+        end_frame = shot_boundaries[i + 1]
         
-        # Set capture to start at the beginning of the clip
-        cap.set(cv2.CAP_PROP_POS_MSEC, start_time * 1000)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        output_path = os.path.join(output_dir, f"{video_filename}_segment_{i + 1}.mp4")
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (int(cap.get(3)), int(cap.get(4))))
         
-        # Initialize VideoWriter for the clip
-        clip_name = os.path.join(output_dir, f"clip_{i}.mp4")
-        out = cv2.VideoWriter(clip_name, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
-        
-        # Read frames and write to the clip until the end time
-        while True:
+        for frame_idx in range(start_frame, end_frame):
             ret, frame = cap.read()
             if not ret:
                 break
-            
-            # Write frame to the clip
             out.write(frame)
-            
-            # Check if reached the end time of the clip
-            if end_time and cap.get(cv2.CAP_PROP_POS_MSEC) >= end_time * 1000:
-                break
         
-        # Release VideoWriter and move to the next clip
         out.release()
-
-    cap.release()
-
-def clip_audio(video_path, shot_boundaries, output_dir):
-    """
-    Clip the audio of the input video based on detected shot boundaries and save each segment as a separate file.
-
-    Args:
-    - video_path (str): Path to the input video file.
-    - shot_boundaries (list): List of timestamps representing shot boundaries.
-    - output_dir (str): Directory to save the clipped audio segments.
-    """
-    video = mp.VideoFileClip(video_path)
-    audio = video.audio
     
-    # Iterate over shot boundaries and create audio clips
-    for i, boundary in enumerate(shot_boundaries):
-        start_time = boundary / 1000  # convert milliseconds to seconds
-        end_time = (shot_boundaries[i + 1] / 1000)-0.1 if i < len(shot_boundaries) - 1 else None
+    cap.release()
+    logging.info(f"Saved segmented clips to {output_dir}")
+
+def extract_audio_segments(video_path, shot_boundaries, output_dir):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    y, sr = librosa.load(video_path, sr=None, mono=True)
+    video_filename = os.path.splitext(os.path.basename(video_path))[0]
+    
+    for i, boundary in enumerate(shot_boundaries[:-1]):
+        start_frame = boundary
+        end_frame = shot_boundaries[i + 1]
+        start_time = start_frame / sr
+        end_time = end_frame / sr
         
-        # Clip the audio
-        audio_clip = audio.subclip(start_time, end_time)
-        
-        # Write audio clip to file
-        audio_clip.write_audiofile(os.path.join(output_dir, f"audio_clip_{i}.mp3"))
+        audio_segment = y[int(start_time * sr):int(end_time * sr)]
+        output_path = os.path.join(output_dir, f"{video_filename}_audio_segment_{i + 1}.wav")
+        librosa.output.write_wav(output_path, audio_segment, sr)
+        logging.info(f"Saved audio segment {i + 1} to {output_path}")
 
 def combine_video_audio(video_dir, audio_dir, output_dir):
-    """
-    Combine the clipped video and audio segments into final clips.
-
-    Args:
-    - video_dir (str): Directory containing the clipped video segments.
-    - audio_dir (str): Directory containing the clipped audio segments.
-    - output_dir (str): Directory to save the combined video clips.
-    """
-    video_files = [f for f in os.listdir(video_dir) if f.endswith('.mp4')]
-    audio_files = [f for f in os.listdir(audio_dir) if f.endswith('.mp3')]
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
     
-    # Ensure equal number of video and audio clips
-    num_clips = min(len(video_files), len(audio_files))
+    video_files = sorted([f for f in os.listdir(video_dir) if f.endswith('.mp4')])
+    audio_files = sorted([f for f in os.listdir(audio_dir) if f.endswith('.wav')])
     
-    for i in range(num_clips):
-        video_path = os.path.join(video_dir, f"clip_{i}.mp4")
-        audio_path = os.path.join(audio_dir, f"audio_clip_{i}.mp3")
+    for video_file, audio_file in zip(video_files, audio_files):
+        video_path = os.path.join(video_dir, video_file)
+        audio_path = os.path.join(audio_dir, audio_file)
         
-        # Load video clip
-        video_clip = mp.VideoFileClip(video_path)
+        video_clip = VideoFileClip(video_path)
+        audio_clip = mp.AudioFileClip(audio_path)
         
-        try:
-            # Load audio clip
-            audio_clip = mp.AudioFileClip(audio_path)
-            
-            # Set audio for video clip
-            video_clip = video_clip.set_audio(audio_clip)
-            
-            # Write combined clip to file
-            combined_clip_path = os.path.join(output_dir, f"combined_clip_{i}.mp4")
-            video_clip.write_videofile(combined_clip_path, codec='libx264', audio_codec='aac')
-            
-            print(f"Combined clip {i} successfully created.")
-        except Exception as e:
-            print(f"Error combining audio and video for clip {i}: {e}")
+        final_clip = video_clip.set_audio(audio_clip)
+        output_path = os.path.join(output_dir, video_file)
         
-        # Remove both video and audio clips
-        os.remove(video_path)
-        os.remove(audio_path)
+        final_clip.write_videofile(output_path, codec='libx264')
+        logging.info(f"Saved combined video-audio file to {output_path}")
 
-def detect_audio_events(video_path, threshold=0.02):
-    video = mp.VideoFileClip(video_path)
-    audio_path = "temp_audio.wav"
-    video.audio.write_audiofile(audio_path)
-    
-    y, sr = librosa.load(audio_path)
-    audio_events = []
-
-    onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-    onset_frames = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
-
-    for frame in onset_frames:
-        event_time = librosa.frames_to_time(frame, sr=sr)
-        audio_events.append(event_time * 1000)  # Convert to milliseconds
-
-    os.remove(audio_path)
-    return audio_events
-
-class VideoActionDataset(Dataset):
-    def __init__(self, video_files, labels, transform=None):
-        self.video_files = video_files
-        self.labels = labels
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.video_files)
-
-    def __getitem__(self, idx):
-        video = mp.VideoFileClip(self.video_files[idx])
-        frames = [frame for frame in video.iter_frames()]
-        label = self.labels[idx]
-        if self.transform:
-            frames = [self.transform(frame) for frame in frames]
-        frames = np.stack(frames)
-        frames = torch.tensor(frames).permute(3, 0, 1, 2)  # Move channels to front
-        return frames, label
-
-def train_action_recognition_model(data_dir):
-    video_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.mp4')]
-    labels_file = os.path.join(data_dir, 'labels.json')
-    with open(labels_file, 'r') as f:
-        labels = json.load(f)
-    
-    # Transform and DataLoader
-    transform = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.Resize((112, 112)),
-        transforms.ToTensor()
-    ])
-    
-    dataset = VideoActionDataset(video_files, labels, transform)
-    dataloader = DataLoader(dataset, batch_size=2, shuffle=True)
-    
-    # Model
-    model = models.video.r3d_18(pretrained=True)
-    model.fc = nn.Linear(model.fc.in_features, len(set(labels.values())))
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
-    
-    # Training Loop
-    num_epochs = 10
-    for epoch in range(num_epochs):
-        model.train()
-        running_loss = 0.0
-        for inputs, labels in dataloader:
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            running_loss += loss.item()
-        
-        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss/len(dataloader)}")
-    
-    torch.save(model.state_dict(), os.path.join(data_dir, 'action_model.pth'))
-
-def infer_and_label(data_dir):
-    video_files = [os.path.join(data_dir, f) for f in os.listdir(data_dir) if f.endswith('.mp4')]
-    labels_file = os.path.join(data_dir, 'labels.json')
-    with open(labels_file, 'r') as f:
-        labels = json.load(f)
-    
-    model = models.video.r3d_18(pretrained=True)
-    model.fc = nn.Linear(model.fc.in_features, len(set(labels.values())))
-    model.load_state_dict(torch.load(os.path.join(data_dir, 'action_model.pth')))
-    model.eval()
-    
-    transform = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.Resize((112, 112)),
-        transforms.ToTensor()
-    ])
-    
-    for video_file in video_files:
-        video = mp.VideoFileClip(video_file)
-        frames = [frame for frame in video.iter_frames()]
-        frames = [transform(frame) for frame in frames]
-        frames = np.stack(frames)
-        frames = torch.tensor(frames).permute(3, 0, 1, 2)  # Move channels to front
-        with torch.no_grad():
-            output = model(frames.unsqueeze(0))
-            _, predicted = torch.max(output, 1)
-        
-        action = labels[str(predicted.item())]
-        labeled_clip = video.subclip(0, 10).set_duration(video.duration).set_text(action, fontsize=50, color='white', bg_color='black', text_position=('center', 'top'))
-        labeled_clip.write_videofile(os.path.join(data_dir, f"labeled_{os.path.basename(video_file)}"), codec='libx264', audio_codec='aac')
-
-
-if __name__ == "__main__":
+def main():
     root = tk.Tk()
     app = VideoSegmentationTool(root)
     root.protocol("WM_DELETE_WINDOW", app.on_closing)
     root.mainloop()
+
+if __name__ == "__main__":
+    main()
