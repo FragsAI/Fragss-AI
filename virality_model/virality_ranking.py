@@ -1,72 +1,104 @@
-import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report
-import joblib
-import isodate
+import cv2
+import os
+import pickle
+from sklearn.linear_model import LinearRegression
+from sklearn.svm import SVR
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
+from sklearn.model_selection import GridSearchCV
+from tqdm import tqdm
 
-# Function to convert ISO 8601 duration to seconds
-def duration_to_seconds(duration):
-    return isodate.parse_duration(duration).total_seconds()
+# Set up logging
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Load data
-minecraft_df = pd.read_csv("minecraft.csv")
-valorant_df = pd.read_csv("valorant.csv")
+def extract_video_features(video_path):
+    cap = cv2.VideoCapture(video_path)
+    features = []
+    
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        mean = np.mean(gray)
+        std = np.std(gray)
+        features.append([mean, std])
+    
+    cap.release()
+    cv2.destroyAllWindows()
+    
+    return np.array(features)
 
-# Combine data into a single dataframe
-df = pd.concat([minecraft_df, valorant_df])
+def scrape_tiktok_hashtags(hashtags, num_videos=100):
+    # Placeholder for actual TikTok scraping logic
+    data = []
+    for hashtag in hashtags:
+        for i in range(num_videos):
+            data.append({
+                'description': f'{hashtag} video {i}',
+                'likes': np.random.randint(100, 10000)
+            })
+    return data
 
-# Preprocess data
-df['duration'] = df['duration'].apply(duration_to_seconds)
-df['views'] = df['views'].astype(int)
-df['likes'] = df['likes'].astype(int)
-df['comments'] = df['comments'].astype(int)
+def extract_features_from_clip(clip_path):
+    features = extract_video_features(clip_path)
+    return np.mean(features, axis=0)  # Use mean of features as a simple example
 
-# Define virality (example: views >= 100000 as viral)
-df['viral'] = np.where(df['views'] >= 100000, 1, 0)
+def rank_clips(clip_paths, model, scaler):
+    features = [extract_features_from_clip(clip_path) for clip_path in clip_paths]
+    features = np.array(features)
+    features_scaled = scaler.transform(features)
+    scores = model.predict(features_scaled)
+    ranked_clips = sorted(zip(scores, clip_paths), reverse=True, key=lambda x: x[0])
+    return ranked_clips
 
-# Feature engineering
-df['likes_per_view'] = df['likes'] / df['views']
-df['comments_per_view'] = df['comments'] / df['views']
+def train_virality_model(video_features_file, labels_file, model_file, scaler_file):
+    X = np.load(video_features_file)
+    y = np.load(labels_file)
+    
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    model = SVR()
+    model.fit(X_scaled, y)
+    
+    with open(model_file, 'wb') as f:
+        pickle.dump(model, f)
+    with open(scaler_file, 'wb') as f:
+        pickle.dump(scaler, f)
+    
+    logging.info("Model trained and saved")
 
-# Fill NaN values resulting from division by zero
-df.fillna(0, inplace=True)
+def load_model(model_path, scaler_path):
+    with open(model_path, 'rb') as f:
+        model = pickle.load(f)
+    with open(scaler_path, 'rb') as f:
+        scaler = pickle.load(f)
+    return model, scaler
 
-# Select features and target
-features = ['duration', 'views', 'likes', 'comments', 'likes_per_view', 'comments_per_view']
-target = 'viral'
+def main():
+    # Training phase
+    video_features_file = '/Users/kesinishivaram/FragsAI/video_features.npy'
+    labels_file = '/Users/kesinishivaram/FragsAI/virality_labels.npy'
+    model_file = 'virality_model.pkl'
+    scaler_file = 'scaler.pkl'
+    
+    logging.info("Training virality model")
+    train_virality_model(video_features_file, labels_file, model_file, scaler_file)
+    
+    # Ranking phase
+    clip_paths = ["clips/clip_001.mp4", "clips/clip_002.mp4", "clips/clip_003.mp4"]  # Example clip paths
+    model, scaler = load_model(model_file, scaler_file)
+    
+    logging.info("Ranking clips based on virality")
+    ranked_clips = rank_clips(clip_paths, model, scaler)
+    
+    print("Ranked clips:")
+    for score, clip_path in ranked_clips:
+        print(f"Clip: {clip_path}, Score: {score}")
 
-X = df[features]
-y = df[target]
-
-# Split the data
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-# Define the model
-model = LogisticRegression(max_iter=1000, random_state=42)
-
-# Hyperparameter tuning using GridSearchCV
-param_grid = {
-    'C': [0.01, 0.1, 1, 10, 100]
-}
-
-grid_search = GridSearchCV(estimator=model, param_grid=param_grid, 
-                           cv=5, n_jobs=-1, verbose=2, scoring='accuracy')
-
-grid_search.fit(X_train, y_train)
-
-# Best model from GridSearchCV
-best_model = grid_search.best_estimator_
-
-# Cross-validation scores
-cv_scores = cross_val_score(best_model, X_train, y_train, cv=5)
-print(f"Cross-validation scores: {cv_scores}")
-print(f"Mean cross-validation score: {cv_scores.mean()}")
-
-# Evaluate the best model on the test set
-y_pred = best_model.predict(X_test)
-print(classification_report(y_test, y_pred))
-
-# Save the best model
-joblib.dump(best_model, 'logistic_virality_model.joblib')
+if __name__ == "__main__":
+    main()
