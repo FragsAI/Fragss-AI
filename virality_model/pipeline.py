@@ -1,6 +1,6 @@
+import os
 import numpy as np
 import cv2
-import os
 import logging
 import pickle
 from sklearn.linear_model import LinearRegression
@@ -10,6 +10,14 @@ from sklearn.pipeline import make_pipeline
 from sklearn.model_selection import GridSearchCV
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
+from sklearn.model_selection import train_test_split
+from keras.layers import Dense
+from keras.optimizers import Adam
+from keras.models import Sequential, load_model
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras_yolo3.yolo import YOLO
+from keras_yolo3.utils import preprocess_image
+from keras.utils import to_categorical
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -53,7 +61,6 @@ def preprocess_frames(input_folder, output_file, resize_dim=(224, 224), augment=
         if np.random.rand() > 0.5:
             frame = cv2.GaussianBlur(frame, (5, 5), 0)
         if np.random.rand() > 0.5:
-            frame = random_noise(frame, mode='speckle')
             frame = np.array(255 * frame, dtype='uint8')
         return frame
 
@@ -75,22 +82,18 @@ def preprocess_frames(input_folder, output_file, resize_dim=(224, 224), augment=
 
 ### Shot Boundary Detection Functions ###
 
-def extract_frames_multithreaded(video_path, num_threads=4):
+def extract_frames_multithreaded(video_path):
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    
-    def process_frame(frame_index):
+    frames = {}
+
+    for frame_index in range(total_frames):
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ret, frame = cap.read()
         if ret:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            return frame_index, gray
-        return frame_index, None
-    
-    with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        futures = [executor.submit(process_frame, i) for i in range(total_frames)]
-        frames = {i: f.result()[1] for i, f in enumerate(futures) if f.result()[1] is not None}
-    
+            frames[frame_index] = gray
+
     cap.release()
     return frames
 
@@ -105,7 +108,7 @@ def detect_shot_boundaries(video_path, method='sift', diff_threshold=50000, matc
     """
     Detects shot boundaries in a video using SIFT, frame differencing, or histogram differences.
     """
-    frames = extract_frames_multithreaded(video_path, num_threads=num_threads)
+    frames = extract_frames_multithreaded(video_path)
     if method == 'sift':
         sift = cv2.SIFT_create()
         bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
@@ -250,6 +253,108 @@ def load_model(model_path, scaler_path):
         scaler = pickle.load(f)
     return model, scaler
 
+### Action Detection Functions ###
+
+def initialize_yolo_model():
+    logging.info("Initializing YOLO model.")
+    return YOLO(
+        model_path='model_data/yolo.h5',
+        anchors_path='model_data/yolo_anchors.txt',
+        classes_path='model_data/coco_classes.txt',
+        score=0.3,
+        iou=0.5,
+        model_image_size=(416, 416)
+    )
+
+def load_and_preprocess_video(video_path, frame_size=(416, 416)):
+    logging.info(f"Loading and preprocessing video: {video_path}")
+    cap = cv2.VideoCapture(video_path)
+    frames = []
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frame = cv2.resize(frame, frame_size)
+        frame = preprocess_image(frame, frame_size)
+        frames.append(frame)
+    cap.release()
+    return np.array(frames)
+
+def extract_video_features_with_yolo(video_frames, yolo):
+    logging.info("Extracting features from video frames using YOLO.")
+    features = []
+    for frame in video_frames:
+        image_data = frame / 255.0
+        image_data = np.expand_dims(image_data, 0)  # Add batch dimension
+        yolo_outputs = yolo.model.predict(image_data)
+        features.append(yolo_outputs)
+    avg_features = np.mean(features, axis=0)
+    return avg_features
+
+def generate_dataset(folder, label, frame_size=(416, 416), chunk_size=16, overlap=8):
+    logging.info(f"Generating dataset from folder: {folder}")
+    videos, labels = [], []
+    for filename in os.listdir(folder):
+        video_path = os.path.join(folder, filename)
+        if not video_path.endswith(('.mp4', '.avi')):
+            continue
+        frames = load_and_preprocess_video(video_path, frame_size)
+        
+        # Divide video into chunks
+        num_chunks = (len(frames) - chunk_size) // overlap + 1
+        for i in range(num_chunks):
+            chunk = frames[i * overlap : i * overlap + chunk_size]
+            if len(chunk) == chunk_size:
+                videos.append(chunk)
+                labels.append(label)
+    return np.array(videos), np.array(labels)
+
+def create_training_data():
+    logging.info("Creating training dataset.")
+    training_folder = './training_videos/'
+    x_train, y_train = generate_dataset(training_folder, label=0)
+    y_train = to_categorical(y_train, num_classes=2)
+    return x_train, y_train
+
+def build_action_classification_model(input_shape, num_classes):
+    logging.info("Building action classification model.")
+    model = Sequential([
+        Dense(512, activation='relu', input_shape=input_shape),
+        Dense(num_classes, activation='softmax')
+    ])
+    return model
+
+def train_action_classification_model(x_train, y_train, x_val, y_val, input_shape, num_classes, model_path='action_model.h5'):
+    logging.info("Training action classification model.")
+    action_model = build_action_classification_model(input_shape, num_classes)
+    action_model.compile(optimizer=Adam(learning_rate=0.001), loss='categorical_crossentropy', metrics=['accuracy'])
+    
+    early_stopping = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
+    model_checkpoint = ModelCheckpoint(model_path, save_best_only=True, monitor='val_loss', mode='min')
+
+    action_model.fit(x_train, y_train, epochs=10, batch_size=16, validation_data=(x_val, y_val), callbacks=[early_stopping, model_checkpoint])
+    return action_model
+
+def load_trained_action_model(model_path='action_model.h5'):
+    if os.path.exists(model_path):
+        logging.info(f"Loading trained action model from {model_path}.")
+        return load_model(model_path)
+    else:
+        raise FileNotFoundError(f"No saved model found at {model_path}")
+
+def predict_video_class(video_path, yolo, action_model, threshold=0.8):
+    logging.info(f"Classifying video: {video_path}")
+    video_frames = load_and_preprocess_video(video_path)
+    avg_features = extract_video_features_with_yolo(video_frames, yolo)
+    norm_features = avg_features / np.linalg.norm(avg_features)
+    
+    predictions = action_model.predict(np.expand_dims(norm_features, axis=0))
+    labels =[]
+    predicted_labels = [labels[i] for i, confidence in enumerate(predictions[0]) if confidence > threshold]
+
+    logging.info(f"Predicted labels for the video: {predicted_labels if predicted_labels else ['other']}")
+    return predicted_labels if predicted_labels else ['other']
+
 ### Main Pipeline Function ###
 
 def main_pipeline(video_path, output_folder, model_file, scaler_file):
@@ -276,12 +381,36 @@ def main_pipeline(video_path, output_folder, model_file, scaler_file):
     logging.info("Ranked clips:")
     for score, clip_path in ranked_clips:
         logging.info(f"Clip: {clip_path}, Score: {score}")
+    
+    # Action Detection
+    logging.info("Starting action detection")
+    yolo = initialize_yolo_model()
+    action_model_path = 'action_model.h5'
+    
+    try:
+        action_model = load_trained_action_model(action_model_path)
+        logging.info("Loaded existing action model.")
+    except FileNotFoundError:
+        logging.info("Training new action model.")
+        x_train, y_train = create_training_data()
+
+        # Split the dataset into training and validation sets
+        x_train, x_val, y_train, y_val = train_test_split(x_train, y_train, test_size=0.2, random_state=42)
+        
+        # Train the action detection model
+        input_shape = (13,)  # Adjust based on the YOLO output shape
+        num_classes = 2
+        action_model = train_action_classification_model(x_train, y_train, x_val, y_val, input_shape, num_classes, action_model_path)
+    
+    # Example usage of action detection
+    for clip_path in clip_paths:
+        predicted_class = predict_video_class(clip_path, yolo, action_model, threshold=0.8)
+        logging.info(f'Predicted class for clip {clip_path}: {predicted_class}')
 
 if __name__ == "__main__":
-    video_path = "input_video.mp4"
+    video_path = "example_video.mp4"
     output_folder = "clips"
     model_file = 'virality_model.pkl'
     scaler_file = 'scaler.pkl'
-    
     
     main_pipeline(video_path, output_folder, model_file, scaler_file)

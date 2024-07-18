@@ -81,8 +81,8 @@ def load_model(model_path, scaler_path):
 
 def main():
     # Training phase
-    video_features_file = 'video_features.npy'
-    labels_file = 'virality_labels.npy'
+    video_features_file = '/Users/kesinishivaram/FragsAI/video_features.npy'
+    labels_file = '/Users/kesinishivaram/FragsAI/virality_labels.npy'
     model_file = 'virality_model.pkl'
     scaler_file = 'scaler.pkl'
     

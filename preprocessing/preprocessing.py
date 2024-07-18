@@ -3,11 +3,14 @@ import numpy as np
 import os
 import logging
 import random
-from skimage.util import random_noise
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor
+from skimage.util import random_noise
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 def extract_frames(video_path, output_folder, frame_rate=1):
     """
@@ -26,26 +29,39 @@ def extract_frames(video_path, output_folder, frame_rate=1):
         if not cap.isOpened():
             logging.error(f"Error opening video file: {video_path}")
             return
-        
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        logging.info(f"Total frames in video: {frame_count}")
-        
+    
+        frame_paths = []
+        frame_count = 0
         extracted_frames = 0
-        with tqdm(total=frame_count // frame_rate, desc="Extracting frames") as pbar:
-            while cap.isOpened():
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                
-                if cap.get(cv2.CAP_PROP_POS_FRAMES) % frame_rate == 0:
+        missed_frames = 0
+        tot_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        progress_bar = tqdm(total=tot_frames//frame_rate, desc="Extracting frames")
+        logging.info(f"Skipping every {frame_rate} frames")
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+
+            if int(cap.get(cv2.CAP_PROP_POS_FRAMES)) % frame_rate == 0:
                     frame_path = os.path.join(output_folder, f"frame_{extracted_frames:06d}.jpg")
-                    cv2.imwrite(frame_path, frame)
-                    extracted_frames += 1
-                    pbar.update(1)
-        
+                    if cv2.imwrite(frame_path, frame):
+                        extracted_frames += 1
+                        frame_paths.append(frame_path)
+                        progress_bar.update(1)
+                    else:
+                        logging.warning(f"Failed to write frame: {frame_path}")
+                        missed_frames += 1
+
+            frame_count += 1
+
         cap.release()
+        progress_bar.close()
+
         cv2.destroyAllWindows()
-        logging.info(f"Extracted {extracted_frames} frames.")
+        logging.info(f"Extracted {extracted_frames} frames. Missed {missed_frames} frames.")
+
+        return frame_paths
     
     except Exception as e:
         logging.error(f"An error occurred during frame extraction: {e}")
@@ -109,21 +125,20 @@ def preprocess_frames(input_folder, output_file, resize_dim=(224, 224), augment=
     except Exception as e:
         logging.error(f"An error occurred during frame preprocessing: {e}")
 
+
 def main():
-    video_path = "input_video.mp4"
-    frames_folder = "frames"
-    output_file = "preprocessed_frames.npy"
+    video_path = 'your video path here'
+    output_dir = 'extracted_frames'
+    frame_rate = 5
+
+    frame_paths = extract_frames(video_path, output_dir, frame_rate=frame_rate)
+    print(f"Extracted and processed {len(frame_paths)} frames.")
+
+    augmented_output_dir =  'augmented'
+    os.makedirs(augmented_output_dir, exist_ok=True)
     
-    frame_rate = 5  # Extract every 5th frame
-    resize_dim = (224, 224)  # Resize dimensions for the frames
-    augment = True  # Apply augmentation to the frames
-    
-    logging.info("Starting frame extraction")
-    extract_frames(video_path, frames_folder, frame_rate)
-    
-    logging.info("Starting frame preprocessing")
-    preprocess_frames(frames_folder, output_file, resize_dim, augment)
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+        list(tqdm(executor.map(lambda frame_path: preprocess_frames(frame_path, augmented_output_dir), frame_paths), total=len(frame_paths), desc="Augmenting frames"))
 
 if __name__ == "__main__":
     main()
-
