@@ -2,7 +2,8 @@ import cv2
 import numpy as np
 import os
 import logging
-from moviepy.editor import VideoFileClip
+import moviepy.editor as mp
+from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, AudioFileClip
 import librosa
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.utils import to_categorical
@@ -13,6 +14,10 @@ from tensorflow.keras.callbacks import EarlyStopping
 import datetime as dt
 from sklearn.metrics import classification_report
 from scipy.stats import variation
+import ffmpeg
+from faster_whisper import WhisperModel
+import pysrt
+import math
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -20,12 +25,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Constants
 IMAGE_HEIGHT, IMAGE_WIDTH = 64, 64
 TIMESTEPS = 10  # Number of frames to consider in each sequence
-CLASS_CATEGORIES_LIST = ["Nunchucks", "Punch"]
 MAX_PIXEL_VALUE = 255
 BATCH_SIZE = 100
 NO_OF_CHANNELS = 3
-NO_OF_CLASSES = len(CLASS_CATEGORIES_LIST)
-MODEL_PATH = '/Users/kesinishivaram/FragsAI/Model___Date_Time_2024_07_16__13_48_36___Loss_2.2341885566711426___Accuracy_0.774193525314331.h5'  # Adjust path to your pre-trained model
+MODEL_PATH = '/Users/kesinishivaram/FragsAI/action_detection_model/Model___Date_Time_2024_07_13__17_00_43___Loss_0.12093261629343033___Accuracy_0.9838709831237793.h5'  # Adjust path to your pre-trained model
 
 # Function to extract frames from a video
 def extract_frames(video_path):
@@ -53,13 +56,13 @@ def extract_audio(video_path):
     os.remove(audio_path)
     return audio, sr
 
-# Function to find loudest moments in audio
-def find_loudest_moments(audio, sr, num_clips=15, clip_length=15):
+# Use audio to find times for segmentation
+def audio_detection(audio, sr, num_clips=5, clip_length=30):
     frame_length = sr * clip_length
     rms = librosa.feature.rms(y=audio, frame_length=frame_length, hop_length=frame_length)[0]
-    loudest_indices = np.argsort(rms)[-num_clips:]
-    loudest_times = loudest_indices * clip_length
-    return loudest_times
+    indices = np.argsort(rms)[-num_clips:]
+    times = indices * clip_length
+    return times
 
 # Function to segment video
 def segment_video(video_path, events, segment_duration=15):
@@ -132,6 +135,152 @@ def normalize_scores(scores):
     normalized_scores = [(score - min_score) / (max_score - min_score) * 99 + 1 for score in scores]
     return normalized_scores
 
+# Function to add subtitles to video clips
+def extract_audio_ffmpeg(input_video):
+    try:
+        input_video_name = os.path.splitext(os.path.basename(input_video))[0]
+        extracted_audio = os.path.join(os.path.dirname(input_video), f"audio-{input_video_name}.wav")
+        # Ensure the directory is properly handled
+        if not os.path.dirname(extracted_audio):
+            extracted_audio = os.path.join(os.getcwd(), f"audio-{input_video_name}.wav")
+        stream = ffmpeg.input(input_video)
+        stream = ffmpeg.output(stream, extracted_audio)
+        ffmpeg.run(stream, overwrite_output=True)
+        logging.info(f"Audio extracted: {extracted_audio}")
+        return extracted_audio
+    except ffmpeg.Error as e:
+        logging.error(f"Error extracting audio: {e}")
+        return None
+
+def transcribe_audio(audio):
+    try:
+        model = WhisperModel("small")
+        segments, info = model.transcribe(audio, word_timestamps=True)
+        language = info[0]
+        logging.info(f"Transcription language: {language}")
+        segments = list(segments)
+        for segment in segments:
+            logging.info(f"[{segment.start:.2f}s -> {segment.end:.2f}s] {segment.text}")
+        return language, segments
+    except Exception as e:
+        logging.error(f"Error in transcription: {e}")
+        return None, None
+    
+def format_time(seconds):
+    hours = math.floor(seconds / 3600)
+    seconds %= 3600
+    minutes = math.floor(seconds / 60)
+    seconds %= 60
+    milliseconds = round((seconds - math.floor(seconds)) * 1000)
+    seconds = math.floor(seconds)
+    formatted_time = f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+    return formatted_time
+
+def generate_subtitle_file(input_video,language, segments):
+    subtitle_file = os.path.join(os.path.dirname(input_video), f"sub-{input_video}.{language}.srt")
+    os.makedirs(os.path.dirname(subtitle_file), exist_ok=True)
+    text = ""
+    for index, segment in enumerate(segments):
+        segment_start = format_time(segment.start)
+        segment_end = format_time(segment.end)
+        text += f"{str(index+1)}\n"
+        text += f"{segment_start} --> {segment_end}\n"
+        text += f"{segment.text}\n\n"
+    with open(subtitle_file, "w") as f:
+        f.write(text)
+    return subtitle_file
+
+def time_to_seconds(time_obj):
+    return time_obj.hours * 3600 + time_obj.minutes * 60 + time_obj.seconds + time_obj.milliseconds / 1000
+
+
+def create_subtitle_clips(subtitles, videosize, fontsize=24, font='Arial', color='yellow', highlight_color='red'):
+    subtitle_clips = []
+    for subtitle in subtitles:
+        start_time = time_to_seconds(subtitle.start)
+        end_time = time_to_seconds(subtitle.end)
+        duration = end_time - start_time
+
+        video_width, video_height = videosize
+
+        # Main subtitle text clip
+        text_clip = TextClip(
+            subtitle.text, fontsize=fontsize, font=font, color=color, bg_color='transparent',
+            size=(video_width * 3 / 4, None), method='caption'
+        ).set_start(start_time).set_duration(duration)
+
+        # Highlighted text clip
+        highlighted_text_clip = TextClip(
+            subtitle.text, fontsize=fontsize, font=font, color=highlight_color, bg_color='transparent',
+            size=(video_width * 3 / 4, None), method='caption'
+        ).set_start(start_time).set_duration(duration)
+
+        subtitle_x_position = 'center'
+        subtitle_y_position = video_height * 4 / 5
+        text_position = (subtitle_x_position, subtitle_y_position)
+
+        # Set positions
+        text_clip = text_clip.set_position(text_position)
+        highlighted_text_clip = highlighted_text_clip.set_position(text_position)
+
+        # Append both clips
+        subtitle_clips.append(highlighted_text_clip)
+        subtitle_clips.append(text_clip)
+
+    return subtitle_clips
+
+def add_subtitle_to_video(video_file, subtitle_file, audio_file):
+    video = VideoFileClip(video_file)
+    subtitles = pysrt.open(subtitle_file)
+    output_video_file = video_file.replace('.mp4', '_subtitled.mp4')
+
+    subtitle_clips = create_subtitle_clips(subtitles, video.size)
+    final_video = CompositeVideoClip([video] + subtitle_clips)
+
+    # Add extracted audio to the final video
+    audio_clip = AudioFileClip(audio_file)
+    final_video = final_video.set_audio(audio_clip)
+
+    final_video.write_videofile(output_video_file)
+    return output_video_file
+
+def enhance_video_with_aspect_ratio(input_video, output_video, width=None, height=None):
+    try:
+        # Load the video
+        video = mp.VideoFileClip(input_video)
+        
+        # Define the desired aspect ratio for TikTok/Shorts (9:16)
+        desired_aspect_ratio = 9 / 16
+        
+        # Get current dimensions
+        width, height = video.size
+        current_aspect_ratio = width / height
+        
+        if current_aspect_ratio > desired_aspect_ratio:
+            # Width is too large, resize by width and pad top and bottom
+            new_width = 720
+            new_height = int(new_width / desired_aspect_ratio)
+            video = video.resize(width=new_width)
+            video = video.margin(top=(new_height - height) // 2, bottom=(new_height - height) // 2)
+        else:
+            # Height is too large, resize by height and pad left and right
+            new_height = 1280
+            new_width = int(new_height * desired_aspect_ratio)
+            video = video.resize(height=new_height)
+            video = video.margin(left=(new_width - width) // 2, right=(new_width - width) // 2)
+
+        # Define output video path
+        output_video = os.path.splitext(input_video)[0] + "_aspect_ratio.mp4"
+        
+        # Write the video file with audio
+        video.write_videofile(output_video)
+
+        logging.info(f"Video enhanced for TikTok/Shorts: {output_video}")
+        return output_video
+    except Exception as e:
+        logging.error(f"Error enhancing video: {e}")
+        return None
+
 # Process each video in the given folder
 def process_videos_in_folder(folder_path):
     video_files = [f for f in os.listdir(folder_path) if f.endswith(('.mp4', '.avi', '.mov'))]
@@ -157,12 +306,22 @@ def process_videos_in_folder(folder_path):
 # Main function to process video
 def main(video_path, output_dir="clips", num_clips=10, clip_length=15):
     audio, sr = extract_audio(video_path)
-    loudest_times = find_loudest_moments(audio, sr, num_clips=num_clips, clip_length=clip_length)
+    loudest_times = audio_detection(audio, sr, num_clips=num_clips, clip_length=clip_length)
     clips = segment_video(video_path, loudest_times, segment_duration=clip_length)
     save_clips(clips, output_dir)
     clip_scores = process_videos_in_folder(output_dir)
-    
+
     for clip_path, score in clip_scores:
+        extracted_audio = extract_audio_ffmpeg(os.path.join(output_dir, clip_path))
+        if extracted_audio:
+            language, segments = transcribe_audio(extracted_audio)
+            if language and segments:
+                enhanced_video = enhance_video_with_aspect_ratio(os.path.join(output_dir, clip_path), os.path.join(output_dir, f"enhanced-{clip_path}"), width=1280)
+                if enhanced_video:
+                    subtitle_file = generate_subtitle_file(input_video=enhanced_video,language=language, segments=segments)
+                    if subtitle_file:
+                        add_subtitle_to_video(video_file=enhanced_video, subtitle_file=subtitle_file, audio_file=extracted_audio)
+    for clip_path, score in clip_scores:  
         logging.info(f"Clip: {clip_path}, Virality Score: {score}")
 
 if __name__ == "__main__":
