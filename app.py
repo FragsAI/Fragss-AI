@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 import os
 import logging
 from werkzeug.utils import secure_filename
-from final_pipeline import (  # Import functions from your module
+from final_pipeline import (
     extract_frames, predict_actions, assess_video_quality, calculate_virality, normalize_scores,
     extract_audio, audio_detection, segment_video, save_clips, process_videos_in_folder,
     extract_audio_ffmpeg, transcribe_audio, generate_subtitle_file, add_subtitle_to_video,
