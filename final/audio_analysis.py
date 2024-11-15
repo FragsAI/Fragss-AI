@@ -1,9 +1,9 @@
+
 import os
 from moviepy.editor import VideoFileClip
 import librosa
 import numpy as np
 import logging
-import datetime as dt
 from pyAudioAnalysis import audioTrainTest as aT
 from pyAudioAnalysis import MidTermFeatures as mtf
 from pydub import AudioSegment
@@ -12,11 +12,10 @@ import speech_recognition as sr
 from tqdm import tqdm
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',
-                    handlers=[logging.FileHandler("audio_analysis.log"), logging.StreamHandler()])
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Extract audio from video
-def extract_audio(video_path, output_audio_path):
+def extract_audio(video_path, output_audio_path="extracted_audio.wav"):
     """
     Extracts audio from a video file.
     Args:
@@ -26,6 +25,7 @@ def extract_audio(video_path, output_audio_path):
     video = VideoFileClip(video_path)
     audio = video.audio
     audio.write_audiofile(output_audio_path)
+    return output_audio_path
 
 # Analyze audio for gunshot sounds
 def analyze_gunshots(audio_path):
@@ -114,9 +114,11 @@ def audio_analysis_pipeline(video_path):
     Complete audio analysis pipeline for gunshot detection, laughter analysis, and transcription.
     Args:
         video_path (str): Path to the video file.
+    Returns:
+        dict: Analysis results including gunshot events, laughter events, and transcription.
     """
-    audio_path = "extracted_audio.wav"
-    extract_audio(video_path, audio_path)
+    # Extract audio from video
+    audio_path = extract_audio(video_path)
 
     # Gunshot detection
     gunshot_events = analyze_gunshots(audio_path)
@@ -126,13 +128,15 @@ def audio_analysis_pipeline(video_path):
     laughter_events = analyze_laughter(audio_path)
     logging.info(f"Detected laughter events at: {laughter_events}")
 
-    # Transcription
+    # Transcription with timestamps
     transcription = transcribe_audio_with_timestamps(audio_path)
-    transcription_output_file = "transcription_with_timestamps.txt"
-    with open(transcription_output_file, 'w') as file:
-        file.write('\n'.join(transcription))
-    logging.info(f"Transcription saved to: {transcription_output_file}")
+    logging.info(f"Transcription completed with timestamps.")
 
-if __name__ == "__main__":
-    video_path = 'your_video_path_here.mp4'
-    audio_analysis_pipeline(video_path)
+    # Combine all results into a dictionary
+    audio_analysis_results = {
+        "gunshot_events": gunshot_events,
+        "laughter_events": laughter_events,
+        "transcription": transcription
+    }
+
+    return audio_analysis_results

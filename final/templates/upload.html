@@ -1,0 +1,52 @@
+<!-- templates/upload.html -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Upload Video</title>
+</head>
+<body>
+    <h1>Upload a Video for Processing</h1>
+    <form action="/" method="POST" enctype="multipart/form-data">
+        <input type="file" name="file" accept="video/*" required>
+        
+        <h3>Subtitle Options</h3>
+        <label for="font">Font:</label>
+        <select name="font" id="font">
+            <option value="Arial">Arial</option>
+            <option value="Helvetica">Helvetica</option>
+            <option value="Times New Roman">Times New Roman</option>
+        </select>
+
+        <label for="color">Color:</label>
+        <input type="color" name="color" id="color">
+
+        <h3>Transition Options</h3>
+        <label for="transition">Transition Style:</label>
+        <select name="transition" id="transition">
+            <option value="fade">Fade</option>
+            <option value="slide">Slide</option>
+            <option value="wipe">Wipe</option>
+        </select>
+
+        <h3>Additional Features</h3>
+        <input type="checkbox" name="background" id="background">
+        <label for="background">Background Change</label><br>
+
+        <input type="checkbox" name="voiceover" id="voiceover">
+        <label for="voiceover">Add Voiceover</label><br>
+
+        <input type="checkbox" name="aspect_ratio" id="aspect_ratio">
+        <label for="aspect_ratio">Adjust Aspect Ratio</label><br>
+
+        <input type="checkbox" name="transcription" id="transcription">
+        <label for="transcription">Add Transcription</label><br>
+
+        <input type="checkbox" name="script_generation" id="script_generation">
+        <label for="script_generation">Generate Script</label><br>
+
+        <input type="submit" value="Upload and Process">
+    </form>
+</body>
+</html>

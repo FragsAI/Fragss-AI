@@ -1,17 +1,24 @@
+# shot_detection.py
+
 import os
 import cv2
 import numpy as np
 import logging
-import tensorflow as tf
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',
-                    handlers=[logging.FileHandler("shot_boundary_detection.log"), logging.StreamHandler()])
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Extract SIFT features from a frame
 def extract_sift_features(frame):
+    """
+    Extract SIFT features from a frame.
+    Args:
+        frame (numpy.ndarray): Video frame.
+    Returns:
+        tuple: Keypoints and descriptors.
+    """
     sift = cv2.SIFT_create()
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     keypoints, descriptors = sift.detectAndCompute(gray_frame, None)
@@ -19,6 +26,15 @@ def extract_sift_features(frame):
 
 # Multithreaded frame extraction
 def extract_frames_multithreaded(video_path, num_threads=4, frame_skip=1):
+    """
+    Extract frames from a video using multithreading.
+    Args:
+        video_path (str): Path to the video file.
+        num_threads (int): Number of threads to use.
+        frame_skip (int): Frame interval to skip.
+    Returns:
+        dict: Extracted frames with indices as keys.
+    """
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
@@ -37,8 +53,20 @@ def extract_frames_multithreaded(video_path, num_threads=4, frame_skip=1):
     cap.release()
     return frames
 
-# Shot boundary detection using SIFT-based feature matching
+# Shot boundary detection using SIFT or frame differencing
 def detect_shot_boundaries(video_path, method='sift', diff_threshold=50, match_threshold=0.7, num_threads=4, frame_skip=1):
+    """
+    Detects shot boundaries in a video.
+    Args:
+        video_path (str): Path to the video file.
+        method (str): Method to use ('sift' or 'diff').
+        diff_threshold (int): Threshold for frame difference method.
+        match_threshold (float): Match threshold for SIFT method.
+        num_threads (int): Number of threads for frame extraction.
+        frame_skip (int): Frame interval to skip.
+    Returns:
+        list: Frame indices of detected shot boundaries.
+    """
     frames = extract_frames_multithreaded(video_path, num_threads=num_threads, frame_skip=frame_skip)
     if method == 'sift':
         sift = cv2.SIFT_create()
@@ -80,6 +108,17 @@ def detect_shot_boundaries(video_path, method='sift', diff_threshold=50, match_t
 
 # Refine shot boundaries using further analysis
 def refine_shot_boundaries(video_path, initial_boundaries, threshold=0.7, num_threads=4, frame_skip=1):
+    """
+    Refines initial shot boundaries using feature matching.
+    Args:
+        video_path (str): Path to the video file.
+        initial_boundaries (list): Initial shot boundaries.
+        threshold (float): Refinement threshold.
+        num_threads (int): Number of threads.
+        frame_skip (int): Frame interval to skip.
+    Returns:
+        list: Refined shot boundaries.
+    """
     frames = extract_frames_multithreaded(video_path, num_threads=num_threads, frame_skip=frame_skip)
     sift = cv2.SIFT_create()
     bf = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
@@ -100,33 +139,3 @@ def refine_shot_boundaries(video_path, initial_boundaries, threshold=0.7, num_th
         prev_des = des
 
     return refined_boundaries
-
-# Build Temporal Convolutional Network (TCN) model for event classification
-def build_tcn(input_shape, num_classes):
-    input_layer = tf.keras.layers.Input(shape=input_shape)
-    x = tf.keras.layers.Conv1D(64, 3, activation='relu')(input_layer)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.MaxPooling1D(2)(x)
-    x = tf.keras.layers.Flatten()(x)
-    x = tf.keras.layers.Dense(128, activation='relu')(x)
-    output_layer = tf.keras.layers.Dense(num_classes, activation='softmax')(x)
-    model = tf.keras.models.Model(inputs=input_layer, outputs=output_layer)
-    return model
-
-# Main function to run shot boundary detection
-def main():
-    video_path = "input_video.mp4"
-    method = 'sift'  # Can be 'diff' for frame differencing or 'sift' for SIFT-based detection
-    frame_skip = 2  # Adjust this value based on your video frame rate and length
-    num_threads = 4
-
-    logging.info("Starting initial shot boundary detection")
-    initial_boundaries = detect_shot_boundaries(video_path, method=method, frame_skip=frame_skip, num_threads=num_threads)
-
-    logging.info("Starting shot boundary refinement")
-    refined_boundaries = refine_shot_boundaries(video_path, initial_boundaries, num_threads=num_threads, frame_skip=frame_skip)
-
-    print("Detected shot boundaries at frames:", refined_boundaries)
-
-if __name__ == "__main__":
-    main()
