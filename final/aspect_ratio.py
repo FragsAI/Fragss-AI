@@ -2,45 +2,53 @@ import moviepy.editor as mp
 import logging
 import os
 
-def enhance_video_for_tiktok(input_video):
+def enhance_video_aspect_ratio(input_video, output_folder, desired_aspect_ratio=9/16, target_width=720, target_height=1280):
+    """
+    Enhances the video by adjusting its aspect ratio for platforms like TikTok/Shorts.
+    Args:
+        input_video (str): Path to the input video.
+        output_folder (str): Folder to save the adjusted video.
+        desired_aspect_ratio (float): Desired aspect ratio (e.g., 9/16 for TikTok).
+        target_width (int): Target width for the output video.
+        target_height (int): Target height for the output video.
+    Returns:
+        str: Path to the output video.
+    """
     try:
+        # Ensure the output folder exists
+        os.makedirs(output_folder, exist_ok=True)
+
         # Load the video
         video = mp.VideoFileClip(input_video)
-        
-        # Define the desired aspect ratio for TikTok/Shorts (9:16)
-        desired_aspect_ratio = 9 / 16
         
         # Get current dimensions
         width, height = video.size
         current_aspect_ratio = width / height
-        
+
+        # Adjust dimensions based on the desired aspect ratio
         if current_aspect_ratio > desired_aspect_ratio:
             # Width is too large, resize by width and pad top and bottom
-            new_width = 720
+            new_width = target_width
             new_height = int(new_width / desired_aspect_ratio)
             video = video.resize(width=new_width)
-            video = video.margin(top=(new_height - height) // 2, bottom=(new_height - height) // 2)
+            padding_top = (new_height - height) // 2
+            video = video.margin(top=padding_top, bottom=padding_top, color=(0, 0, 0))  # Black padding
         else:
             # Height is too large, resize by height and pad left and right
-            new_height = 1280
+            new_height = target_height
             new_width = int(new_height * desired_aspect_ratio)
             video = video.resize(height=new_height)
-            video = video.margin(left=(new_width - width) // 2, right=(new_width - width) // 2)
+            padding_left = (new_width - width) // 2
+            video = video.margin(left=padding_left, right=padding_left, color=(0, 0, 0))  # Black padding
 
         # Define output video path
-        output_video = os.path.splitext(input_video)[0] + "_aspect_ratio.mp4"
+        output_video = os.path.join(output_folder, os.path.basename(input_video).replace(".mp4", "_aspect_ratio.mp4"))
         
         # Write the video file with audio
-        video.write_videofile(output_video)
+        video.write_videofile(output_video, codec="libx264", audio_codec="aac")
 
-        logging.info(f"Video enhanced for TikTok/Shorts: {output_video}")
+        logging.info(f"Video enhanced for aspect ratio {desired_aspect_ratio}: {output_video}")
         return output_video
     except Exception as e:
-        logging.error(f"Error enhancing video: {e}")
+        logging.error(f"Error enhancing video aspect ratio: {e}")
         return None
-
-# Example usage
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    input_video_path = "/Users/kesinishivaram/FragsAI/clips/clip_2.mp4"
-    enhance_video_for_tiktok(input_video_path)

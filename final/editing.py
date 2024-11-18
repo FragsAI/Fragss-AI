@@ -4,7 +4,18 @@ import requests
 sandbox_key = "uxkEreSYgnrPj4q4hxVuJYqA0jwDoQ3SjIvwiEEV"
 production_key = "xB9YvCM80apOAjKyfAJCwHKYsc0XuQq4dKpDv3Th"
 
-def edit_video(clip_url, title="Gaming Stream Clip"):
+def edit_video(clip_url, soundtrack_url=None, title="Gaming Stream Clip", resolution="hd", length=10):
+    """
+    Edits a video using the Shotstack API with user-provided inputs.
+    Args:
+        clip_url (str): URL of the video clip.
+        soundtrack_url (str): URL of the soundtrack.
+        title (str): Title for the clip.
+        resolution (str): Video resolution (e.g., 'hd').
+        length (int): Length of the clip in seconds.
+    Returns:
+        dict or str: Response from the Shotstack API or error details.
+    """
     headers = {
         "x-api-key": sandbox_key,  # Use production_key for production
         "Content-Type": "application/json"
@@ -13,7 +24,7 @@ def edit_video(clip_url, title="Gaming Stream Clip"):
     data = {
         "timeline": {
             "soundtrack": {
-                "src": "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/free/music.mp3",  # Example audio
+                "src": soundtrack_url or "https://shotstack-assets.s3-ap-southeast-2.amazonaws.com/music/free/music.mp3",
             },
             "tracks": [
                 {
@@ -24,7 +35,7 @@ def edit_video(clip_url, title="Gaming Stream Clip"):
                                 "src": clip_url
                             },
                             "start": 0,
-                            "length": 10,  # Edit based on your clip
+                            "length": length,
                             "title": title
                         }
                     ]
@@ -33,7 +44,7 @@ def edit_video(clip_url, title="Gaming Stream Clip"):
         },
         "output": {
             "format": "mp4",
-            "resolution": "hd"
+            "resolution": resolution
         }
     }
     
@@ -42,6 +53,3 @@ def edit_video(clip_url, title="Gaming Stream Clip"):
         return response.json()  # Contains render ID and status
     else:
         return f"Error: {response.status_code}, {response.text}"
-
-# Example usage
-edit_video("https://your-video-url.com/clip.mp4")

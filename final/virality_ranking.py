@@ -8,7 +8,7 @@ import pandas as pd
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
-from tensorflow.keras.models import load_model
+from keras.models import load_model
 from joblib import load
 import re
 from tqdm import tqdm
