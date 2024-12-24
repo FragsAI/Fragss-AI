@@ -1,0 +1,81 @@
+<!-- templates/process.html -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Processing Results</title>
+</head>
+<body>
+    <h1>Video Processing Results</h1>
+
+    <!-- Actions Detected Section -->
+    <h2>Actions Detected</h2>
+    {% if actions %}
+        <ul>
+            {% for action in actions %}
+                <li>Frame: {{ action.frame }}, Action: {{ action.action }}, Confidence: {{ action.confidence }}</li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>No actions detected.</p>
+    {% endif %}
+
+    <!-- Audio Analysis Results -->
+    <h2>Audio Analysis Results</h2>
+    {% if audio %}
+        <h3>Gunshot Events</h3>
+        <ul>
+            {% for event in audio.gunshot_events %}
+                <li>Timestamp: {{ event }}</li>
+            {% endfor %}
+        </ul>
+
+        <h3>Laughter Events</h3>
+        <ul>
+            {% for event in audio.laughter_events %}
+                <li>Timestamp: {{ event }}</li>
+            {% endfor %}
+        </ul>
+
+        <h3>Transcription with Timestamps</h3>
+        <ul>
+            {% for line in audio.transcription %}
+                <li>{{ line }}</li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>No audio events detected.</p>
+    {% endif %}
+
+    <!-- Shot Boundaries -->
+    <h2>Shot Boundaries Detected</h2>
+    {% if shots %}
+        <ul>
+            {% for boundary in shots %}
+                <li>Frame: {{ boundary }}</li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>No shot boundaries detected.</p>
+    {% endif %}
+
+    <!-- Ranked Clips -->
+    <h2>Ranked Clips Based on Virality</h2>
+    {% if ranked_clips %}
+        <ol>
+            {% for score, clip in ranked_clips %}
+                <li>
+                    Clip: <video width="320" height="240" controls>
+                        <source src="{{ clip }}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                    <p>Virality Score: {{ score }}</p>
+                </li>
+            {% endfor %}
+        </ol>
+    {% else %}
+        <p>No clips ranked based on virality.</p>
+    {% endif %}
+</body>
+</html>
