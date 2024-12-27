@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+.venv/
+.venv/*
+venv/
+ENV/
+.env
+pyvenv.cfg
+bin/
+include/
+Scripts/
+share/
+.python-version
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Project specific
+uploads/
+processed/
+processed_frames/
+*.mp4
+*.avi
+*.mov
+*.wav
+*.jpg
+*.jpeg
+*.png
+*.npy
+*.h5
+
+# Logs
+*.log
+logs/
+
+# Redis
+dump.rdb
+
+# Celery
+celerybeat-schedule
+celerybeat.pid 

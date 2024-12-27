@@ -6,7 +6,16 @@ import concurrent.futures
 from collections import deque
 from scipy.stats import norm
 import os
-from shot_sift import extract_frames_multithreaded
+import logging
+from tqdm import tqdm
+from typing import List, Dict, Tuple, Optional
+import warnings
+
+# Suppress warnings
+warnings.filterwarnings('ignore')
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class FrameExtractor:
     def __init__(self, video_path, buffer_size=30):
@@ -87,6 +96,33 @@ def calculate_dynamic_threshold(differences, window_size=30):
     sigma = np.std(recent_diffs)
     threshold = mu + 2 * sigma  # 2 sigma for 95% confidence
     return threshold
+
+def extract_frames_multithreaded(video_path, num_threads=4, frame_skip=1):
+    """Extract frames from video using multiple threads."""
+    cap = cv2.VideoCapture(video_path)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
+    def process_frame(frame_index):
+        cap = cv2.VideoCapture(video_path)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        ret, frame = cap.read()
+        cap.release()
+        if ret:
+            return frame_index, frame
+        return frame_index, None
+    
+    frame_indices = range(0, total_frames, frame_skip)
+    frames = {}
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = [executor.submit(process_frame, i) for i in frame_indices]
+        for future in tqdm(futures, desc="Extracting frames"):
+            idx, frame = future.result()
+            if frame is not None:
+                frames[idx] = frame
+    
+    cap.release()
+    return frames
 
 def detect_shot_boundaries(video_path, method='sift', diff_threshold=50, match_threshold=0.7, num_threads=4, frame_skip=1, min_shot_length=15):
     # Check if file exists
