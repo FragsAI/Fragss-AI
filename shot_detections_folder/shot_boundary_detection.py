@@ -5,6 +5,8 @@ from sklearn.preprocessing import StandardScaler
 import concurrent.futures
 from collections import deque
 from scipy.stats import norm
+import os
+from shot_sift import extract_frames_multithreaded
 
 class FrameExtractor:
     def __init__(self, video_path, buffer_size=30):
@@ -86,10 +88,18 @@ def calculate_dynamic_threshold(differences, window_size=30):
     threshold = mu + 2 * sigma  # 2 sigma for 95% confidence
     return threshold
 
-def detect_shot_boundaries(video_path, min_shot_length=10):
-    # Initialize frame extractor
-    extractor = FrameExtractor(video_path)
-    frames = extractor.extract_frames_parallel()
+def detect_shot_boundaries(video_path, method='sift', diff_threshold=50, match_threshold=0.7, num_threads=4, frame_skip=1, min_shot_length=15):
+    # Check if file exists
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+    
+    # Try to open video
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video file: {video_path}")
+    cap.release()
+    
+    frames = extract_frames_multithreaded(video_path, num_threads=num_threads, frame_skip=frame_skip)
     
     if not frames:
         print("Error: No frames extracted from video")
@@ -123,8 +133,8 @@ def detect_shot_boundaries(video_path, min_shot_length=10):
             
             # Combine frame difference and feature similarity for shot boundary detection
             is_boundary = (diff > diff_threshold and 
-                         (len(feature_similarities) == 0 or feature_similarities[-1] < sim_threshold) and
-                         (i - shot_boundaries[-1]) >= min_shot_length)
+                        (len(feature_similarities) == 0 or feature_similarities[-1] < sim_threshold) and
+                        (i - shot_boundaries[-1]) >= min_shot_length)
             
             if is_boundary:
                 shot_boundaries.append(i)
@@ -141,6 +151,6 @@ def detect_shot_boundaries(video_path, min_shot_length=10):
     return timestamps
 
 if __name__ == "__main__":
-    video_path = "/Users/kesinishivaram/FragsAI/Fragss-AI/cod.mp4"
+    video_path = "/Users/rnzgrd/Downloads/SOLO_VS_SQUAD_34_KILLS_FULL_GAMEPLAY_CALL_OF_DUTY_MOBILE_BATTLE_ROYALE.mp4"
     shot_boundaries = detect_shot_boundaries(video_path)
     print(f"Shot boundaries detected at (ms): {shot_boundaries}")

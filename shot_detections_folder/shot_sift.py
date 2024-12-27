@@ -3,28 +3,46 @@ import numpy as np
 import logging
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
+import threading
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Create a thread lock for video operations
+video_lock = threading.Lock()
+
 def extract_frames_multithreaded(video_path, num_threads=4, frame_skip=1):
-    cap = cv2.VideoCapture(video_path)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    """
+    Extract frames from a video using multithreading with proper synchronization.
+    """
+    with video_lock:
+        cap = cv2.VideoCapture(video_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     def process_frame(frame_index):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-        ret, frame = cap.read()
-        if ret:
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            return frame_index, gray
-        return frame_index, None
+        with video_lock:
+            local_cap = cv2.VideoCapture(video_path)
+            local_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+            ret, frame = local_cap.read()
+            local_cap.release()
+            
+            if ret:
+                return frame_index, frame
+            return frame_index, None
 
     frame_indices = range(0, total_frames, frame_skip)
+    frames = {}
+    
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         futures = [executor.submit(process_frame, i) for i in frame_indices]
-        frames = {i: f.result()[1] for i, f in zip(frame_indices, futures) if f.result()[1] is not None}
+        for future in tqdm(futures, desc="Extracting frames"):
+            idx, frame = future.result()
+            if frame is not None:
+                frames[idx] = frame
 
-    cap.release()
+    with video_lock:
+        cap.release()
+    
     return frames
 
 def calculate_histogram_difference(frame1, frame2):
@@ -48,7 +66,8 @@ def detect_shot_boundaries(video_path, method='sift', diff_threshold=50, match_t
 
     with tqdm(total=len(frames), desc="Detecting shot boundaries") as pbar:
         for frame_index in sorted(frames.keys()):
-            gray = frames[frame_index]
+            frame = frames[frame_index]
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
             if method == 'diff':
                 if prev_frame is not None:
