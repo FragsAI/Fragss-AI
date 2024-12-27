@@ -1,143 +1,156 @@
 import cv2
+import numpy as np
 from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler
+import concurrent.futures
+from collections import deque
+from scipy.stats import norm
+import os
+from shot_sift import extract_frames_multithreaded
 
+class FrameExtractor:
+    def __init__(self, video_path, buffer_size=30):
+        self.video_path = video_path
+        self.buffer_size = buffer_size
+        self.frame_buffer = deque(maxlen=buffer_size)
+        self.cap = None
+        self.total_frames = 0
+        self.initialize_video()
+
+    def initialize_video(self):
+        self.cap = cv2.VideoCapture(self.video_path)
+        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    def extract_frame_range(self, start_frame, num_frames):
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        frames = []
+        for _ in range(num_frames):
+            ret, frame = self.cap.read()
+            if not ret:
+                break
+            frames.append(frame)
+        return frames
+
+    def extract_frames_parallel(self, num_threads=4):
+        frames_per_thread = self.total_frames // num_threads
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+            future_frames = []
+            for i in range(num_threads):
+                start_frame = i * frames_per_thread
+                num_frames = frames_per_thread if i < num_threads - 1 else self.total_frames - start_frame
+                future = executor.submit(self.extract_frame_range, start_frame, num_frames)
+                future_frames.append(future)
+            
+            all_frames = []
+            for future in concurrent.futures.as_completed(future_frames):
+                all_frames.extend(future.result())
+        return all_frames
+
+    def __del__(self):
+        if self.cap:
+            self.cap.release()
 
 def preprocess_frame(frame):
-    # Convert frame to grayscale
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     return gray_frame
 
-def detect_edges(frame):
-    # Apply Canny edge detection
-    edges = cv2.Canny(frame, threshold1=50, threshold2=150)
-    return edges
+def calculate_frame_difference(frame1, frame2):
+    diff = cv2.absdiff(frame1, frame2)
+    return np.mean(diff)
 
-def calculate_histogram(frame):
-    # Calculate histogram of the grayscale frame
-    hist = cv2.calcHist([frame], [0], None, [256], [0, 256])
-    return hist.flatten()
-
-def calculate_histogram_difference(hist1, hist2):
-    # Compare two histograms using Bhattacharyya distance
-    hist_diff = cv2.compareHist(hist1, hist2, cv2.HISTCMP_BHATTACHARYYA)
-    return hist_diff
-
-def extract_sift_features(frame):
-    # Extract SIFT features from the frame
-    sift = cv2.SIFT_create()
-    keypoints, descriptors = sift.detectAndCompute(frame, None)
+def extract_orb_features(frame, n_features=500):
+    orb = cv2.ORB_create(nfeatures=n_features)
+    keypoints, descriptors = orb.detectAndCompute(frame, None)
     return keypoints, descriptors
 
-def extract_surf_features(frame):
-    # Extract SURF features from the frame
-    surf = cv2.SURF_create()
-    keypoints, descriptors = surf.detectAndCompute(frame, None)
-    return keypoints, descriptors
+def calculate_feature_similarity(desc1, desc2):
+    if desc1 is None or desc2 is None:
+        return 0.0
+    
+    # Use Hamming distance for ORB descriptors
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    matches = bf.match(desc1, desc2)
+    
+    if len(matches) == 0:
+        return 0.0
+        
+    avg_distance = sum(m.distance for m in matches) / len(matches)
+    similarity = 1.0 / (1.0 + avg_distance)
+    return similarity
 
-def extract_hog_features(frame):
-    # Extract HOG features from the frame
-    hog = cv2.HOGDescriptor()
-    hog_features = hog.compute(frame)
-    return hog_features
+def calculate_dynamic_threshold(differences, window_size=30):
+    if len(differences) < window_size:
+        return np.mean(differences) + 2 * np.std(differences)
+    
+    recent_diffs = differences[-window_size:]
+    mu = np.mean(recent_diffs)
+    sigma = np.std(recent_diffs)
+    threshold = mu + 2 * sigma  # 2 sigma for 95% confidence
+    return threshold
 
-def train_svm_model(X_train, y_train):
-    # Train SVM model using scaled feature vectors
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    svm = SVC(kernel='linear')
-    svm.fit(X_train_scaled, y_train)
-    return svm
-
-def classify_shot_boundaries(frames, labels, svm_model):
-    # Classify shot boundaries using SVM model
-    feature_vectors = []
-    for frame in frames:
-        # Example: Extract SIFT features
-        keypoints, descriptors = extract_sift_features(frame)
-        if descriptors is not None:
-            feature_vectors.append(descriptors.flatten())
-
-    # Scale feature vectors
-    scaler = StandardScaler()
-    scaled_features = scaler.fit_transform(feature_vectors)
-
-    # Predict shot boundaries using SVM
-    predictions = svm_model.predict(scaled_features)
-    shot_boundaries = [i for i, label in enumerate(predictions) if label == 1]
-    return shot_boundaries
-
-# Baseline shot boundary detection using edge detection and histogram-based methods
-def shot_boundary_detection(video_path):
+def detect_shot_boundaries(video_path, method='sift', diff_threshold=50, match_threshold=0.7, num_threads=4, frame_skip=1, min_shot_length=15):
+    # Check if file exists
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+    
+    # Try to open video
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        print("Error: Couldn't open video file")
-        return []
-
-    prev_frame = None
-    shot_boundaries = [0]
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        # Preprocess frame
-        gray_frame = preprocess_frame(frame)
-
-        # Edge detection
-        edges = detect_edges(gray_frame)
-
-        # Histogram calculation
-        hist = calculate_histogram(gray_frame)
-        if prev_frame is not None:
-            prev_hist = calculate_histogram(prev_frame)
-            hist_diff = calculate_histogram_difference(prev_hist, hist)
-            if hist_diff > 0.5:  # Adjust the threshold as needed
-                shot_boundaries.append(cap.get(cv2.CAP_PROP_POS_MSEC))
-
-        prev_frame = gray_frame
-
+        raise ValueError(f"Could not open video file: {video_path}")
     cap.release()
-    return shot_boundaries
-
-# Shot boundary detection using machine learning with feature extraction
-def shot_boundary_detection_with_ml(video_path):
+    
+    frames = extract_frames_multithreaded(video_path, num_threads=num_threads, frame_skip=frame_skip)
+    
+    if not frames:
+        print("Error: No frames extracted from video")
+        return []
+    
+    shot_boundaries = [0]  # First frame is always a boundary
+    frame_differences = []
+    feature_similarities = []
+    
+    prev_frame = preprocess_frame(frames[0])
+    prev_descriptors = None
+    
+    # Process frames
+    for i in range(1, len(frames)):
+        curr_frame = preprocess_frame(frames[i])
+        
+        # Calculate frame difference
+        diff = calculate_frame_difference(prev_frame, curr_frame)
+        frame_differences.append(diff)
+        
+        # Extract ORB features and calculate similarity
+        _, curr_descriptors = extract_orb_features(curr_frame)
+        if prev_descriptors is not None:
+            similarity = calculate_feature_similarity(prev_descriptors, curr_descriptors)
+            feature_similarities.append(similarity)
+        
+        # Calculate dynamic thresholds
+        if len(frame_differences) >= 3:
+            diff_threshold = calculate_dynamic_threshold(frame_differences)
+            sim_threshold = calculate_dynamic_threshold(feature_similarities) if feature_similarities else 0.5
+            
+            # Combine frame difference and feature similarity for shot boundary detection
+            is_boundary = (diff > diff_threshold and 
+                        (len(feature_similarities) == 0 or feature_similarities[-1] < sim_threshold) and
+                        (i - shot_boundaries[-1]) >= min_shot_length)
+            
+            if is_boundary:
+                shot_boundaries.append(i)
+        
+        prev_frame = curr_frame
+        prev_descriptors = curr_descriptors
+    
+    # Convert frame indices to timestamps
     cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print("Error: Couldn't open video file")
-        return []
-
-    frames = []
-    labels = []
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        # Preprocess frame
-        gray_frame = preprocess_frame(frame)
-
-        # Example: Extract SIFT features
-        keypoints, descriptors = extract_sift_features(gray_frame)
-        if descriptors is not None:
-            frames.append(descriptors.flatten())
-            labels.append(1)  # 1 indicates shot boundary, you need to label your data accordingly
-
+    fps = cap.get(cv2.CAP_PROP_FPS)
     cap.release()
-
-    # Train SVM model
-    svm_model = train_svm_model(frames, labels)
-
-    # Classify shot boundaries
-    shot_boundaries = classify_shot_boundaries(frames, labels, svm_model)
-
-    return shot_boundaries
-
+    
+    timestamps = [frame_idx / fps * 1000 for frame_idx in shot_boundaries]
+    return timestamps
 
 if __name__ == "__main__":
-    # Replace with video path relative to you
-    video_path = "/Users/kesinishivaram/FragsAI/Fragss-AI/cod.mp4"  # Path to input video
-    shot_boundaries = shot_boundary_detection(video_path)
-    print(f"Shot boundary detection complete. {shot_boundaries}")
+    video_path = "/Users/rnzgrd/Downloads/SOLO_VS_SQUAD_34_KILLS_FULL_GAMEPLAY_CALL_OF_DUTY_MOBILE_BATTLE_ROYALE.mp4"
+    shot_boundaries = detect_shot_boundaries(video_path)
+    print(f"Shot boundaries detected at (ms): {shot_boundaries}")
