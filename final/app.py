@@ -12,9 +12,11 @@ from subtitles import apply_subtitles_to_clips
 from editing import edit_video
 from background import generate_background
 from voiceover import generate_voiceover
-from aspect_ratio import adjust_aspect_ratio
+from aspect_ratio import enhance_video_aspect_ratio
 from transcription import transcribe_video
 from script import generate_stream_script
+
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
 app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
@@ -112,7 +114,7 @@ def process_video():
         
         if aspect_ratio:
             logging.info("Adjusting aspect ratio...")
-            adjust_aspect_ratio(clip_paths)
+            enhance_video_aspect_ratio(clip_paths)
         
         # Step 7: Virality Ranking
         logging.info("Ranking clips based on virality...")
