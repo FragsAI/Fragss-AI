@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 import os
 import logging
 from werkzeug.utils import secure_filename
@@ -14,17 +14,81 @@ app = Flask(__name__)
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Define upload folder
+# Define upload and output folders
 UPLOAD_FOLDER = 'uploads'
+OUTPUT_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
 
-# Function to process video and return results
+@app.route('/upload_video', methods=['POST'])
+def upload_video():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+
+    # Check for valid file type
+    if file and file.filename.lower().endswith(('.mp4', '.avi', '.mov')):
+        try:
+            # Save the uploaded video file
+            filename = secure_filename(file.filename)
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(file_path)
+            logging.info(f"Video successfully saved at: {file_path}")
+            
+            # Return success response with the filename
+            return jsonify({'status': 'success', 'filename': filename}), 200
+        except Exception as e:
+            logging.error(f"Error saving video file: {e}")
+            return jsonify({'error': 'Failed to save video'}), 500
+    else:
+        return jsonify({'error': 'Invalid file type'}), 400
+
+    
+# Endpoint to process the video asynchronously
+@app.route('/process_video', methods=['POST'])
+def process_video_endpoint():
+    data = request.get_json()
+    video_filename = data.get('video_filename')
+
+    if not video_filename:
+        return jsonify({'error': 'No video filename provided'}), 400
+
+    video_path = os.path.join(app.config['UPLOAD_FOLDER'], video_filename)
+    logging.info(f"Processing video from path: {video_path}")
+
+    if not os.path.exists(video_path):
+        return jsonify({'error': 'Video not found.'}), 404
+
+    try:
+        results = process_video(video_path)
+        if not results:
+            return jsonify({'status': 'success', 'results': []}), 200
+
+        return jsonify({
+            'status': 'success',
+            'results': [{
+                'clip': result['clip'],
+                'virality_score': result['virality_score'],
+                'final_video': result['final_video']
+            } for result in results]
+        }), 200
+    except Exception as e:
+        logging.error(f"Error processing video: {e}")
+        return jsonify({'error': 'Failed to process video'}), 500
+
+
+    
+# Helper function to process video and return results
 def process_video(video_path):
     audio, sr = extract_audio(video_path)
     loudest_times = audio_detection(audio, sr)
     clips = segment_video(video_path, loudest_times)
-    save_clips(clips, UPLOAD_FOLDER)
+    save_clips(clips, OUTPUT_FOLDER)
     video_scores = process_videos_in_folder(UPLOAD_FOLDER)
     
     results = []
@@ -45,30 +109,27 @@ def process_video(video_path):
                             'final_video': final_video
                         })
     return results
+    
+# Endpoint to get virality scores for processed clips
+@app.route('/get_scores', methods=['GET'])
+def get_scores():
+    try:
+        video_scores = process_videos_in_folder(OUTPUT_FOLDER)
+        return jsonify({'scores': video_scores}), 200
+    except Exception as e:
+        logging.error(f"Error fetching scores: {e}")
+        return jsonify({'error': 'Failed to fetch scores'}), 500
 
-@app.route('/upload_video', methods=['POST'])
-def upload_video():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
+# Endpoint to download processed clips
+@app.route('/download_clip/<clip_filename>', methods=['GET'])
+def download_clip(clip_filename):
+    clip_path = os.path.join(app.config['OUTPUT_FOLDER'], clip_filename)
+    
+    if not os.path.exists(clip_path):
+        return jsonify({'error': 'Clip not found.'}), 404
 
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
+    return send_from_directory(os.path.abspath(app.config['OUTPUT_FOLDER']), clip_filename)
 
-    if file and file.filename.lower().endswith(('.mp4', '.avi', '.mov')):
-        filename = secure_filename(file.filename)
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(file_path)
-        logging.info(f"Video saved at: {file_path}")
-
-        try:
-            results = process_video(file_path)
-            return jsonify({'status': 'success', 'results': results}), 200
-        except Exception as e:
-            logging.error(f"Error processing video: {e}")
-            return jsonify({'error': 'Failed to process video'}), 500
-    else:
-        return jsonify({'error': 'Invalid file type'}), 400
 
 if __name__ == '__main__':
     app.run(debug=True)
