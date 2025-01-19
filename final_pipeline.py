@@ -19,6 +19,19 @@ from faster_whisper import WhisperModel
 import pysrt
 import math
 
+'''
+`moviepy` version needs to be 1.0.3
+If unable to import `ffmpeg` then install by running `pip install ffmpeg-python`
+If unable to install `pysrt` then install by running `pip install pysrt`
+If unable to install `WhisperModel` then istall `faster_whisper` by running `! pip install faster_whisper`; then import `faster_whisper` and `WhisperModel`
+
+`numpy` vesrion needs to be 1.24, run `pip install numpy==1.24` to install and restart the kernel and import numpy
+`keras` vesrion needs to be 3.5.0, run  `pip install keras==3.5.0` to install and restart the kernel and import keras
+`tensorflow` vesrion needs to be 2.17.1, run `pip install tensorflow==2.17.1` to install and restart the kernel and import tensorflow
+`h5py` vesrion needs to be 3.12.1, run `pip install h5py==3.12.1` to install and restart the kernel and import h5py (run `import h5py`)
+
+'''
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -28,7 +41,7 @@ TIMESTEPS = 10  # Number of frames to consider in each sequence
 MAX_PIXEL_VALUE = 255
 BATCH_SIZE = 100
 NO_OF_CHANNELS = 3
-MODEL_PATH = '/Users/kesinishivaram/FragsAI/action_detection_model/Model___Date_Time_2024_07_13__17_00_43___Loss_0.12093261629343033___Accuracy_0.9838709831237793.h5'  # Adjust path to your pre-trained model
+MODEL_PATH = input('Input your model path: ')
 
 # Function to extract frames from a video
 def extract_frames(video_path):
@@ -93,6 +106,7 @@ model = load_model(MODEL_PATH, compile=False)
 def predict_actions(frames):
     features = np.array(frames).reshape(1, TIMESTEPS, IMAGE_HEIGHT, IMAGE_WIDTH, NO_OF_CHANNELS)
     logging.info(f"Predicting actions for frames with shape: {features.shape}")
+    
     predictions = model.predict(features)
     return predictions
 
@@ -148,19 +162,36 @@ def extract_audio_ffmpeg(input_video):
         ffmpeg.run(stream, overwrite_output=True)
         logging.info(f"Audio extracted: {extracted_audio}")
         return extracted_audio
+        '''
+        If any error such as 'WindowsError: [Error 2] The system cannot find the file specified' encounters then run below line of codes: 
+        pip uninstall ffmpeg-python
+        conda install ffmpeg        # only if you use jupyter notebook
+        pip install ffmpeg-python
+        '''
     except ffmpeg.Error as e:
         logging.error(f"Error extracting audio: {e}")
         return None
 
-def transcribe_audio(audio):
+def transcribe_audio(audio, model_size, device):
+    '''
+    audio: Audio extracted by extract_audio_ffmpeg()
+    model_size: 'tiny' or 'large-v3'
+    device: 'cpu' or 'cuda'
+    '''
     try:
-        model = WhisperModel("small")
-        segments, info = model.transcribe(audio, word_timestamps=True)
-        language = info[0]
+        # # model_size = 'large-v3'
+        # model_size = input('Input the model size ("tiny" or "large-v3"): ')
+        # device = input('Input the device ("cpu" or "cuda"): ')
+        model = WhisperModel(model_size_or_path=model_size, device=device, compute_type="int8")
+        segments, info = model.transcribe(audio, word_timestamps=True, beam_size=5)
+        language = info.language
+        language_probability= info.language_probability
+        print("Detected language '%s' with probability %f" % (language, language_probability))
         logging.info(f"Transcription language: {language}")
         segments = list(segments)
         for segment in segments:
             logging.info(f"[{segment.start:.2f}s -> {segment.end:.2f}s] {segment.text}")
+            print("[%.2fs -> %.2fs] %s" % (segment.start, segment.end, segment.text))
         return language, segments
     except Exception as e:
         logging.error(f"Error in transcription: {e}")
@@ -195,6 +226,11 @@ def time_to_seconds(time_obj):
 
 
 def create_subtitle_clips(subtitles, videosize, fontsize=24, font='Arial', color='yellow', highlight_color='red'):
+    '''
+    subtitles: Subtitles after opening using pysrt.open()
+    videosize: VideoFileClip(your_video_path).size
+    
+    '''
     subtitle_clips = []
     for subtitle in subtitles:
         start_time = time_to_seconds(subtitle.start)
@@ -202,6 +238,21 @@ def create_subtitle_clips(subtitles, videosize, fontsize=24, font='Arial', color
         duration = end_time - start_time
 
         video_width, video_height = videosize
+        
+        '''
+        `moviepy` version needs to 1.0.3. For `TextClip` to work run the below line codes
+        For colab:
+        !pip install moviepy
+        !apt install imagemagick
+        !apt install libmagick++-dev
+        !cat /etc/ImageMagick-6/policy.xml | sed 's/none/read,write/g'> /etc/ImageMagick-6/policy.xml
+        
+        For local system:
+        Run `winget install ImageMagick.Q16-HDRI` in command prompt
+        After installation, run the code below to add ImageMagick to your system's PATH.
+        from moviepy.config import change_settings
+        change_settings({"IMAGEMAGICK_BINARY":"C:\your_path\ImageMagick.Q16-HDRI_7.1.1.43_x64__b3hnabsze9y3j\magick.exe"})
+        '''
 
         # Main subtitle text clip
         text_clip = TextClip(
@@ -304,7 +355,7 @@ def process_videos_in_folder(folder_path):
     return sorted_video_scores
 
 # Main function to process video
-def main(video_path, output_dir="clips", num_clips=10, clip_length=15):
+def main(MODEL_PATH, video_path, model_size, device, output_dir="clips", num_clips=10, clip_length=15):
     audio, sr = extract_audio(video_path)
     loudest_times = audio_detection(audio, sr, num_clips=num_clips, clip_length=clip_length)
     clips = segment_video(video_path, loudest_times, segment_duration=clip_length)
@@ -314,7 +365,7 @@ def main(video_path, output_dir="clips", num_clips=10, clip_length=15):
     for clip_path, score in clip_scores:
         extracted_audio = extract_audio_ffmpeg(os.path.join(output_dir, clip_path))
         if extracted_audio:
-            language, segments = transcribe_audio(extracted_audio)
+            language, segments = transcribe_audio(extracted_audio, model_size, device)
             if language and segments:
                 enhanced_video = enhance_video_with_aspect_ratio(os.path.join(output_dir, clip_path), os.path.join(output_dir, f"enhanced-{clip_path}"), width=1280)
                 if enhanced_video:
@@ -325,5 +376,9 @@ def main(video_path, output_dir="clips", num_clips=10, clip_length=15):
         logging.info(f"Clip: {clip_path}, Virality Score: {score}")
 
 if __name__ == "__main__":
-    video_path = '/Users/kesinishivaram/FragsAI/Fragss-AI/cod.mp4'  # Adjust path to your video
-    main(video_path)
+    MODEL_PATH = input('Input model path: ')
+    video_path = input('Input video path: ') # Adjust path to your video
+    model_size = input("Input model size ('tiny' or 'large-v3'): ")
+    device =     input("Input device ('cpu' or 'cuda'): ")
+    main(MODEL_PATH,video_path, model_size, device)
+
