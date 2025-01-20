@@ -84,7 +84,7 @@ def process_video_endpoint():
 
     
 # Helper function to process video and return results
-def process_video(video_path):
+def process_video(video_path,model_size, device):
     audio, sr = extract_audio(video_path)
     loudest_times = audio_detection(audio, sr)
     clips = segment_video(video_path, loudest_times)
@@ -96,7 +96,7 @@ def process_video(video_path):
         clip_file_path = os.path.join(UPLOAD_FOLDER, clip_path)
         extracted_audio = extract_audio_ffmpeg(clip_file_path)
         if extracted_audio:
-            language, segments = transcribe_audio(extracted_audio)
+            language, segments = transcribe_audio(extracted_audio, model_size, device)
             if language and segments:
                 enhanced_video = enhance_video_with_aspect_ratio(clip_file_path, clip_file_path)
                 if enhanced_video:
