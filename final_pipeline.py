@@ -4,6 +4,7 @@ import os
 import logging
 import moviepy.editor as mp
 from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, AudioFileClip
+from moviepy.config import change_settings
 import librosa
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.utils import to_categorical
@@ -18,6 +19,8 @@ import ffmpeg
 from faster_whisper import WhisperModel
 import pysrt
 import math
+
+import warnings
 
 '''
 `moviepy` version needs to be 1.0.3
