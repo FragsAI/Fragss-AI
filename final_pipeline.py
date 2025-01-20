@@ -35,7 +35,7 @@ If unable to install `WhisperModel` then istall `faster_whisper` by running `! p
 `h5py` vesrion needs to be 3.12.1, run `pip install h5py==3.12.1` to install and restart the kernel and import h5py (run `import h5py`)
 
 '''
-imagemagick_path=input('Input full path of "magick.exe": ')
+imagemagick_path=input('Input full path of "magick.exe": ') # eg: C:\Program Files\ImageMagick-7.1.1-Q16\magick.exe
 change_settings({"IMAGEMAGICK_BINARY":imagemagick_path}) #Adjust as per your system's PATH
 
 # Configure logging
@@ -339,15 +339,15 @@ def enhance_video_with_aspect_ratio(input_video, output_video, width=None, heigh
         return None
 
 # Process each video in the given folder
-def process_videos_in_folder(folder_path):
-    video_files = [f for f in os.listdir(folder_path) if f.endswith(('.mp4', '.avi', '.mov'))]
+def process_videos_in_folder(output_dir):
+    video_files = [f for f in os.listdir(output_dir) if f.endswith(('.mp4', '.avi', '.mov'))]
     if not video_files:
-        logging.error(f"No clip_*.mp4 files found in folder: {folder_path}")
+        logging.error(f"No clip_*.mp4 files found in folder: {output_dir}")
         return []  # Return an empty list when no relevant video files are found    
     video_scores = {}
     
     for video_file in video_files:
-        video_path = os.path.join(folder_path, video_file)
+        video_path = os.path.join(output_dir, video_file)
         frames = extract_frames(video_path)
         predictions = predict_actions(frames)
         quality_metrics = assess_video_quality(frames)
@@ -364,7 +364,7 @@ def process_videos_in_folder(folder_path):
     return sorted_video_scores
 
 # Main function to process video
-def main(MODEL_PATH, video_path, model_size='small', device='cpu', output_dir="clips", num_clips=10, clip_length=15):
+def main(MODEL_PATH, video_path, model_size='small', device='cpu', output_dir="output", num_clips=10, clip_length=15):
     audio, sr = extract_audio(video_path)
     loudest_times = audio_detection(audio, sr, num_clips=num_clips, clip_length=clip_length)
     clips = segment_video(video_path, loudest_times, segment_duration=clip_length)
@@ -385,9 +385,8 @@ def main(MODEL_PATH, video_path, model_size='small', device='cpu', output_dir="c
         logging.info(f"Clip: {clip_path}, Virality Score: {score}")
 
 if __name__ == "__main__":
-    MODEL_PATH = input('Input model path: ')
-    video_path = input('Input video path: ') # Adjust path to your video
+    MODEL_PATH = input('Input Model path: ')
+    video_path = input('Input video path:') # Adjust path to your video
     model_size = input("Input model size ('tiny' or 'small' or 'large-v3'): ")
     device =     input("Input device ('cpu' or 'cuda'): ")
     main(MODEL_PATH,video_path, model_size, device)
-
