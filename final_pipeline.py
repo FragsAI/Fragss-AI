@@ -47,7 +47,7 @@ TIMESTEPS = 10  # Number of frames to consider in each sequence
 MAX_PIXEL_VALUE = 255
 BATCH_SIZE = 100
 NO_OF_CHANNELS = 3
-MODEL_PATH = input('Input your model path: ')
+MODEL_PATH = input('Input your model path: ') #Path of `.h5` file
 
 # Function to extract frames from a video
 def extract_frames(video_path):
@@ -341,6 +341,9 @@ def enhance_video_with_aspect_ratio(input_video, output_video, width=None, heigh
 # Process each video in the given folder
 def process_videos_in_folder(folder_path):
     video_files = [f for f in os.listdir(folder_path) if f.endswith(('.mp4', '.avi', '.mov'))]
+    if not video_files:
+        logging.error(f"No clip_*.mp4 files found in folder: {folder_path}")
+        return []  # Return an empty list when no relevant video files are found    
     video_scores = {}
     
     for video_file in video_files:
@@ -361,7 +364,7 @@ def process_videos_in_folder(folder_path):
     return sorted_video_scores
 
 # Main function to process video
-def main(MODEL_PATH, video_path, model_size, device, output_dir="clips", num_clips=10, clip_length=15):
+def main(MODEL_PATH, video_path, model_size='small', device='cpu', output_dir="clips", num_clips=10, clip_length=15):
     audio, sr = extract_audio(video_path)
     loudest_times = audio_detection(audio, sr, num_clips=num_clips, clip_length=clip_length)
     clips = segment_video(video_path, loudest_times, segment_duration=clip_length)
@@ -384,7 +387,7 @@ def main(MODEL_PATH, video_path, model_size, device, output_dir="clips", num_cli
 if __name__ == "__main__":
     MODEL_PATH = input('Input model path: ')
     video_path = input('Input video path: ') # Adjust path to your video
-    model_size = input("Input model size ('tiny' or 'large-v3'): ")
+    model_size = input("Input model size ('tiny' or 'small' or 'large-v3'): ")
     device =     input("Input device ('cpu' or 'cuda'): ")
     main(MODEL_PATH,video_path, model_size, device)
 
