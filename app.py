@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # Define upload and output folders
 UPLOAD_FOLDER = 'uploads'
-OUTPUT_FOLDER = 'uploads'
+OUTPUT_FOLDER = 'output'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -81,25 +81,37 @@ def process_video_endpoint():
         logging.error(f"Error processing video: {e}")
         return jsonify({'error': 'Failed to process video'}), 500
 
+
+    
 # Helper function to process video and return results
-def process_video(video_path, model_size='small', device='cpu'):
+def process_video(video_path):
     audio, sr = extract_audio(video_path)
     loudest_times = audio_detection(audio, sr)
     clips = segment_video(video_path, loudest_times)
     save_clips(clips, OUTPUT_FOLDER)
-    video_scores = process_videos_in_folder(UPLOAD_FOLDER)
+    video_scores = process_videos_in_folder(OUTPUT_FOLDER)
     
     results = []
     for clip_path, score in video_scores:
-        clip_file_path = os.path.join(UPLOAD_FOLDER, clip_path)
+        clip_file_path = os.path.join(OUTPUT_FOLDER, clip_path)
+
+        # Extract audio from the current clip
         extracted_audio = extract_audio_ffmpeg(clip_file_path)
         if extracted_audio:
-            language, segments = transcribe_audio(extracted_audio, model_size, device)
+
+            # Transcribe the extracted audio to get language and segments
+            language, segments = transcribe_audio(extracted_audio)
             if language and segments:
-                enhanced_video = enhance_video_with_aspect_ratio(clip_file_path, clip_file_path)
+
+                # Enhance the video while maintaining aspect ratio
+                enhanced_video = enhance_video_with_aspect_ratio(clip_file_path, OUTPUT_FOLDER)
                 if enhanced_video:
+
+                    # Generate subtitle file for the enhanced video
                     subtitle_file = generate_subtitle_file(enhanced_video, language, segments)
                     if subtitle_file:
+
+                        # Add subtitles to the enhanced video and save the final video
                         final_video = add_subtitle_to_video(enhanced_video, subtitle_file, extracted_audio)
                         results.append({
                             'clip': clip_path,
