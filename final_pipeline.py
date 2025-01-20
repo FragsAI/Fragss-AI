@@ -172,11 +172,11 @@ def extract_audio_ffmpeg(input_video):
         logging.error(f"Error extracting audio: {e}")
         return None
 
-def transcribe_audio(audio, model_size, device):
+def transcribe_audio(audio, model_size='small', device='cpu'):
     '''
     audio: Audio extracted by extract_audio_ffmpeg()
-    model_size: 'tiny' or 'large-v3'
-    device: 'cpu' or 'cuda'
+    model_size: 'tiny' or 'small' or 'large-v3'. Default 'small'
+    device: 'cpu' or 'cuda'.  Default 'cpu'
     '''
     try:
         # # model_size = 'large-v3'
@@ -191,7 +191,7 @@ def transcribe_audio(audio, model_size, device):
         segments = list(segments)
         for segment in segments:
             logging.info(f"[{segment.start:.2f}s -> {segment.end:.2f}s] {segment.text}")
-            print("[%.2fs -> %.2fs] %s" % (segment.start, segment.end, segment.text))
+            # print("[%.2fs -> %.2fs] %s" % (segment.start, segment.end, segment.text))
         return language, segments
     except Exception as e:
         logging.error(f"Error in transcription: {e}")
