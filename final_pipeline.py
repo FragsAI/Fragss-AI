@@ -35,6 +35,8 @@ If unable to install `WhisperModel` then istall `faster_whisper` by running `! p
 `h5py` vesrion needs to be 3.12.1, run `pip install h5py==3.12.1` to install and restart the kernel and import h5py (run `import h5py`)
 
 '''
+imagemagick_path=input('Input full path of "magick.exe": ')
+change_settings({"IMAGEMAGICK_BINARY":imagemagick_path}) #Adjust as per your system's PATH
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
