@@ -21,7 +21,7 @@ import pysrt
 import math
 
 import warnings
-warnings.filterwarnings('ignore')
+warnings.filterwarnings('ignore',category=UserWarning, module="moviepy")
 
 '''
 `moviepy` version needs to be 1.0.3
