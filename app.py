@@ -81,10 +81,8 @@ def process_video_endpoint():
         logging.error(f"Error processing video: {e}")
         return jsonify({'error': 'Failed to process video'}), 500
 
-
-    
 # Helper function to process video and return results
-def process_video(video_path,model_size, device):
+def process_video(video_path, model_size='small', device='cpu'):
     audio, sr = extract_audio(video_path)
     loudest_times = audio_detection(audio, sr)
     clips = segment_video(video_path, loudest_times)
