@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, render_template
 import os
 import logging
 from werkzeug.utils import secure_filename
@@ -9,7 +9,7 @@ from final_pipeline import (
     enhance_video_with_aspect_ratio
 )
 
-app = Flask(__name__)
+app = Flask(__name__,template_folder='final/templates')
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -22,31 +22,33 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
 
-@app.route('/upload_video', methods=['POST'])
+@app.route('/', methods=['POST','GET'])
 def upload_video():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
+    if request.method=='POST':
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file part'}), 400
 
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No selected file'}), 400
 
-    # Check for valid file type
-    if file and file.filename.lower().endswith(('.mp4', '.avi', '.mov')):
-        try:
-            # Save the uploaded video file
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
-            logging.info(f"Video successfully saved at: {file_path}")
-            
-            # Return success response with the filename
-            return jsonify({'status': 'success', 'filename': filename}), 200
-        except Exception as e:
-            logging.error(f"Error saving video file: {e}")
-            return jsonify({'error': 'Failed to save video'}), 500
-    else:
-        return jsonify({'error': 'Invalid file type'}), 400
+        # Check for valid file type
+        if file and file.filename.lower().endswith(('.mp4', '.avi', '.mov')):
+            try:
+                # Save the uploaded video file
+                filename = secure_filename(file.filename)
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(file_path)
+                logging.info(f"Video successfully saved at: {file_path}")
+                
+                # Return success response with the filename
+                return jsonify({'status': 'success', 'filename': filename}), 200
+            except Exception as e:
+                logging.error(f"Error saving video file: {e}")
+                return jsonify({'error': 'Failed to save video'}), 500
+        else:
+            return jsonify({'error': 'Invalid file type'}), 400
+    return render_template('upload.html')
 
     
 # Endpoint to process the video asynchronously
@@ -142,4 +144,4 @@ def download_clip(clip_filename):
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True,port=5000)
