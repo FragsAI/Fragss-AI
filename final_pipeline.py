@@ -51,6 +51,10 @@ MODEL_PATH = input('Input your model path: ') #Path of `.h5` file
 
 # Function to extract frames from a video
 def extract_frames(video_path):
+    '''
+    Args:
+    video_path: video path to extracts frames using OpenCV (cv2)
+    '''
     frames_list = []
     videoObj = cv2.VideoCapture(video_path)
     logging.info(f"Extracting frames from video: {video_path}")
