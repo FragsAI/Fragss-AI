@@ -3,7 +3,7 @@ import numpy as np
 import os
 import logging
 import random
-from tqdm 
+from tqdm import tqdm 
 from tqdm.auto import tqdm
 from concurrent.futures import ThreadPoolExecutor
 from albumentations import Compose, RandomBrightnessContrast, RandomCrop, HorizontalFlip, GaussianBlur
