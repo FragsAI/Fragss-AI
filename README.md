@@ -37,3 +37,21 @@ Contributions to the Video Segmentation Tool are welcome! If you find any issues
 
 - The `shot_boundary_detection`, `clip_video`, `clip_audio`, and `combine_video_audio` functions were adapted from the `Video_Segmentation_Tool.py` file.
 - The GUI implementation was based on the Tkinter library.
+
+## Thing to remember before running app.py:
+1. Download FFmpeg:
+- Download the Files: https://drive.google.com/drive/folders/1Ku9nnmQfBpeNI9M1HyvEoFQlbZorIX2Y?usp=drive_link
+- Once downloaded, extract it to a folder, for example, C:\ffmpeg-master-latest-win64-gpl-shared\bin.
+- Add FFmpeg to the System PATH:
+- Right-click on "This PC" or "Computer" and select "Properties".
+- Click on "Advanced system settings" and then click on the "Environment Variables" button.
+- Under "System variables", find and select the Path variable, then click "Edit".
+- In the "Edit Environment Variable" window, click "New" and add the path to the bin folder where you extracted FFmpeg (e.g., C:\ffmpeg-master-latest-win64-gpl-shared\bin).
+- Click "OK" to close all windows.
+
+2. ImageMagick
+- Download and Install ImageMagick
+- Run the installer and follow the installation steps.
+- During the installation, make sure to:
+- Select the option to add ImageMagick to your system's PATH ex: C:\Program Files\ImageMagick-7.1.1-Q16.
+- Choose the "Install legacy utilities (e.g., convert)" option if you need older commands like convert.

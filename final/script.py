@@ -1,17 +1,15 @@
-import openai
+from openai import OpenAI
 
-# GPT API key is imported directly
-openai.api_key = 'your_openai_api_key_here'
+client = OpenAI()
 
 def generate_stream_script(prompt):
-    response = openai.Completion.create(
-      engine="text-davinci-003",  # Or use "gpt-4"
-      prompt=prompt,
-      max_tokens=500
+    response = client.completions.create(
+        model="gpt-3.5-turbo-instruct",  # or your preferred model
+        prompt=prompt,
+        max_tokens=150,
+        temperature=0.7
     )
-    script = response['choices'][0]['text'].strip()
-    return script
-
+    return response.choices[0].text
 # Example usage
 script = generate_stream_script("Generate a funny script for a gaming stream highlight")
 print(script)
