@@ -19,6 +19,8 @@ import ffmpeg
 from faster_whisper import WhisperModel
 import pysrt
 import math
+import platform
+
 
 import warnings
 warnings.filterwarnings('ignore',category=UserWarning, module="moviepy")
@@ -35,8 +37,10 @@ If unable to install `WhisperModel` then istall `faster_whisper` by running `! p
 `h5py` vesrion needs to be 3.12.1, run `pip install h5py==3.12.1` to install and restart the kernel and import h5py (run `import h5py`)
 
 '''
-imagemagick_path=input('Input full path of "magick.exe": ') # eg: C:\Program Files\ImageMagick-7.1.1-Q16\magick.exe
-change_settings({"IMAGEMAGICK_BINARY":imagemagick_path}) #Adjust as per your system's PATH
+if platform.system() == "Windows":
+    imagemagick_path = "C:\\Program Files\\ImageMagick-7.1.1-Q16\\magick.exe"  # Windows 的路径
+else:
+    imagemagick_path = "magick"  # macOS/Linux change_settings({"IMAGEMAGICK_BINARY":imagemagick_path}) #Adjust as per your system's PATH
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
