@@ -28,7 +28,7 @@ TIMESTEPS = 10  # Number of frames to consider in each sequence
 MAX_PIXEL_VALUE = 255
 BATCH_SIZE = 100
 NO_OF_CHANNELS = 3
-MODEL_PATH = '/Users/kesinishivaram/FragsAI/action_detection_model/Model___Date_Time_2024_07_13__17_00_43___Loss_0.12093261629343033___Accuracy_0.9838709831237793.h5'  # Adjust path to your pre-trained model
+MODEL_PATH = '/Users/zheng_liu/Documents/GitHubProjects/Fragss-AI/action_detection_model/Model___Date_Time_2024_07_13__17_00_43___Loss_0.12093261629343033___Accuracy_0.9838709831237793.h5'  # Adjust path to your pre-trained model
 
 # Function to extract frames from a video
 def extract_frames(video_path):
