@@ -35,7 +35,7 @@ If unable to install `WhisperModel` then istall `faster_whisper` by running `! p
 `h5py` vesrion needs to be 3.12.1, run `pip install h5py==3.12.1` to install and restart the kernel and import h5py (run `import h5py`)
 
 '''
-imagemagick_path=input('Input full path of "magick.exe": ') # eg: C:\Program Files\ImageMagick-7.1.1-Q16\magick.exe
+imagemagick_path= 'C:/Program Files/ImageMagick-7.1.1-Q16/magick.exe' # eg: C:\Program Files\ImageMagick-7.1.1-Q16\magick.exe
 change_settings({"IMAGEMAGICK_BINARY":imagemagick_path}) #Adjust as per your system's PATH
 
 # Configure logging
@@ -47,7 +47,7 @@ TIMESTEPS = 10  # Number of frames to consider in each sequence
 MAX_PIXEL_VALUE = 255
 BATCH_SIZE = 100
 NO_OF_CHANNELS = 3
-MODEL_PATH = input('Input your model path: ') #Path of `.h5` file
+MODEL_PATH = 'Model___Date_Time_2024_07_13__17_00_43___Loss_0.12093261629343033___Accuracy_0.9838709831237793.h5' #Path of `.h5` file
 
 # Function to extract frames from a video
 def extract_frames(video_path):
@@ -217,7 +217,7 @@ def format_time(seconds):
     formatted_time = f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
     return formatted_time
 
-def generate_subtitle_file(input_video,language, segments):
+def generate_subtitle_file(input_video, language, segments, font_color, font_size, font_type):
     subtitle_file = os.path.join(os.path.dirname(input_video), f"sub-{input_video}.{language}.srt")
     os.makedirs(os.path.dirname(subtitle_file), exist_ok=True)
     text = ""
@@ -227,20 +227,17 @@ def generate_subtitle_file(input_video,language, segments):
         text += f"{str(index+1)}\n"
         text += f"{segment_start} --> {segment_end}\n"
         text += f"{segment.text}\n\n"
-    with open(subtitle_file, "w") as f:
+    with open(subtitle_file, "w", encoding='utf-8') as f:
         f.write(text)
+    
+    # Return subtitle file with user preferences applied
     return subtitle_file
 
 def time_to_seconds(time_obj):
     return time_obj.hours * 3600 + time_obj.minutes * 60 + time_obj.seconds + time_obj.milliseconds / 1000
 
 
-def create_subtitle_clips(subtitles, videosize, fontsize=24, font='Arial', color='yellow', highlight_color='red'):
-    '''
-    subtitles: Subtitles after opening using pysrt.open()
-    videosize: VideoFileClip(your_video_path).size
-    
-    '''
+def create_subtitle_clips(subtitles, videosize, font_size, font_type, font_color, highlight_color='red'):
     subtitle_clips = []
     for subtitle in subtitles:
         start_time = time_to_seconds(subtitle.start)
@@ -248,31 +245,16 @@ def create_subtitle_clips(subtitles, videosize, fontsize=24, font='Arial', color
         duration = end_time - start_time
 
         video_width, video_height = videosize
-        
-        '''
-        `moviepy` version needs to 1.0.3. For `TextClip` to work run the below line codes
-        For colab:
-        !pip install moviepy
-        !apt install imagemagick
-        !apt install libmagick++-dev
-        !cat /etc/ImageMagick-6/policy.xml | sed 's/none/read,write/g'> /etc/ImageMagick-6/policy.xml
-        
-        For local system:
-        Run `winget install ImageMagick.Q16-HDRI` in command prompt
-        After installation, run the code below to add ImageMagick to your system's PATH.
-        from moviepy.config import change_settings
-        change_settings({"IMAGEMAGICK_BINARY":"C:\your_path\ImageMagick.Q16-HDRI_7.1.1.43_x64__b3hnabsze9y3j\magick.exe"})
-        '''
 
         # Main subtitle text clip
         text_clip = TextClip(
-            subtitle.text, fontsize=fontsize, font=font, color=color, bg_color='transparent',
+            subtitle.text, fontsize=font_size, font=font_type, color=font_color, bg_color='transparent',
             size=(video_width * 3 / 4, None), method='caption'
         ).set_start(start_time).set_duration(duration)
 
         # Highlighted text clip
         highlighted_text_clip = TextClip(
-            subtitle.text, fontsize=fontsize, font=font, color=highlight_color, bg_color='transparent',
+            subtitle.text, fontsize=font_size, font=font_type, color=highlight_color, bg_color='transparent',
             size=(video_width * 3 / 4, None), method='caption'
         ).set_start(start_time).set_duration(duration)
 
@@ -290,20 +272,25 @@ def create_subtitle_clips(subtitles, videosize, fontsize=24, font='Arial', color
 
     return subtitle_clips
 
-def add_subtitle_to_video(video_file, subtitle_file, audio_file):
+def add_subtitle_to_video(video_file, subtitle_file, audio_file, font_color, font_size, font_type):
     video = VideoFileClip(video_file)
     subtitles = pysrt.open(subtitle_file)
     output_video_file = video_file.replace('.mp4', '_subtitled.mp4')
 
-    subtitle_clips = create_subtitle_clips(subtitles, video.size)
+    # Create subtitle clips with custom font settings
+    subtitle_clips = create_subtitle_clips(subtitles, video.size, font_size, font_type, font_color)
+    
+    # Composite the video with subtitle clips
     final_video = CompositeVideoClip([video] + subtitle_clips)
 
-    # Add extracted audio to the final video
+    # Add the audio to the final video
     audio_clip = AudioFileClip(audio_file)
     final_video = final_video.set_audio(audio_clip)
 
+    # Write the final video to file
     final_video.write_videofile(output_video_file)
     return output_video_file
+
 
 def enhance_video_with_aspect_ratio(input_video, output_video, width=None, height=None):
     try:
@@ -389,8 +376,8 @@ def main(MODEL_PATH, video_path, model_size='small', device='cpu', output_dir="o
         logging.info(f"Clip: {clip_path}, Virality Score: {score}")
 
 if __name__ == "__main__":
-    MODEL_PATH = input('Input Model path: ')
-    video_path = input('Input video path:') # Adjust path to your video
+    MODEL_PATH = 'Model___Date_Time_2024_07_13__17_00_43___Loss_0.12093261629343033___Accuracy_0.9838709831237793.h5'
+    video_path = 'cod_Amaanfile.mp4' # Adjust path to your video
     model_size = input("Input model size ('tiny' or 'small' or 'large-v3'): ")
     device =     input("Input device ('cpu' or 'cuda'): ")
     main(MODEL_PATH,video_path, model_size, device)
