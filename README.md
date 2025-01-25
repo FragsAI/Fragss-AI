@@ -55,3 +55,16 @@ Contributions to the Video Segmentation Tool are welcome! If you find any issues
 - During the installation, make sure to:
 - Select the option to add ImageMagick to your system's PATH ex: C:\Program Files\ImageMagick-7.1.1-Q16.
 - Choose the "Install legacy utilities (e.g., convert)" option if you need older commands like convert.
+
+## Function to check for existing fonts in the system ("to be executed in seperate file"):
+    from matplotlib import font_manager
+
+    # Get all available font paths
+    font_paths = font_manager.findSystemFonts(fontpaths=None, fontext='ttf')
+
+    # Print font names and their paths
+    print("Available Fonts:")
+    for font_path in font_paths:
+        font_name = font_manager.FontProperties(fname=font_path).get_name()
+        print(f"{font_name} : {font_path}")
+
