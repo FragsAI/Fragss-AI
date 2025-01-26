@@ -25,33 +25,66 @@ def extract_sift_features(frame):
     return keypoints, descriptors
 
 # Multithreaded frame extraction
+def process_frame(frame_indices, video_path):
+    """
+    Process a batch of frames in a thread.
+
+    Args:
+        frame_indices (list): List of frame indices to be processed by this thread.
+        video_path (str): Path to the video file.
+
+    Returns:
+        dict: A dictionary containing frame indices as keys and frames as values.
+    """
+    # Create a local VideoCapture instance for this thread
+    cap = cv2.VideoCapture(video_path)
+    frames = {}
+
+    # Process each frame in the assigned batch
+    for frame_index in frame_indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)  # Move to the specific frame
+        ret, frame = cap.read()  # Read the frame
+        if ret:
+            frames[frame_index] = frame  # Store the frame if read successfully
+
+    cap.release()  # Release the VideoCapture resource
+    return frames
+
+
 def extract_frames_multithreaded(video_path, num_threads=4, frame_skip=1):
     """
-    Extract frames from a video using multithreading.
+    Extract frames from a video file using multithreading.
+
     Args:
         video_path (str): Path to the video file.
-        num_threads (int): Number of threads to use.
-        frame_skip (int): Frame interval to skip.
+        num_threads (int): Number of threads to use for frame extraction.
+        frame_skip (int): Interval to skip between frames (e.g., frame_skip=1 extracts every frame).
+
     Returns:
-        dict: Extracted frames with indices as keys.
+        dict: A dictionary containing all extracted frames, with frame indices as keys.
     """
+    # Open the video to determine the total number of frames
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    def process_frame(frame_index):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-        ret, frame = cap.read()
-        if ret:
-            return frame_index, frame
-        return frame_index, None
-
-    frame_indices = range(0, total_frames, frame_skip)
-    with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        futures = [executor.submit(process_frame, i) for i in frame_indices]
-        frames = {i: f.result()[1] for i, f in zip(frame_indices, futures) if f.result()[1] is not None}
-
     cap.release()
-    return frames
+
+    # Generate the list of frame indices to extract
+    frame_indices = list(range(0, total_frames, frame_skip))
+
+    # Split the frame indices into chunks for each thread
+    chunk_size = (len(frame_indices) + num_threads - 1) // num_threads  # Divide frame indices evenly
+    frame_chunks = [frame_indices[i:i + chunk_size] for i in range(0, len(frame_indices), chunk_size)]
+
+    # Use a thread pool to process the frame chunks
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = [executor.submit(process_frame, chunk, video_path) for chunk in frame_chunks]
+        results = {}
+
+        # Collect results from all threads
+        for future in futures:
+            results.update(future.result())
+
+    return results
 
 # Shot boundary detection using SIFT or frame differencing
 def detect_shot_boundaries(video_path, method='sift', diff_threshold=50, match_threshold=0.7, num_threads=4, frame_skip=1):
