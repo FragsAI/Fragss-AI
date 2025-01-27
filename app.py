@@ -38,7 +38,7 @@ FONT_TYPES = {
 # Endpoint to upload any video 
 @app.route('/', methods=['POST','GET'])
 def upload_video():
-     if request.method=='POST':
+    if request.method=='POST':
         if 'file' not in request.files:
             return jsonify({'error': 'No file part'}), 400
         file = request.files['file']
@@ -60,7 +60,7 @@ def upload_video():
                 return jsonify({'error': 'Failed to save video'}), 500
         else:
             return jsonify({'error': 'Invalid file type'}), 400
-        return render_template('upload.html')
+    return render_template('upload.html')
  
 # Endpoint to process any video 
 @app.route('/process_video', methods=['POST'])
@@ -198,4 +198,4 @@ def download_voiceover(filename):
     return send_from_directory(os.path.abspath(VOICEOVER_FOLDER), filename)
 
 if __name__ == '__main__':
-    app.run(debug=True,port=5000)
+    app.run(debug=True,port=5002)
