@@ -1,39 +1,34 @@
-# clip_segmentation.py
-
-import cv2
 import os
+import logging
+import cv2
 import librosa
 from moviepy.editor import VideoFileClip, AudioFileClip
-import logging
 from tqdm import tqdm
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Segment clips based on shot boundaries
-def segment_clips(video_path, shot_boundaries, output_dir):
+def segment_clips(video_path, output_dir, segment_duration=60, max_segments=30):
     """
-    Segments video into clips based on detected shot boundaries.
-    Args:
-        video_path (str): Path to the original video file.
-        shot_boundaries (list): List of frame indices where shots begin.
-        output_dir (str): Directory to save segmented clips.
+    Segments video into 1-minute clips, limiting to a maximum number of segments.
     """
     video_filename = os.path.splitext(os.path.basename(video_path))[0]
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    logging.info("Starting video segmentation based on shot boundaries")
-    for i, boundary in enumerate(shot_boundaries[:-1]):
-        start_frame = boundary
-        end_frame = shot_boundaries[i + 1]
-
-        # Set the start position of the video capture to the start frame
+    logging.info("Starting video segmentation")
+    segment_count = 0
+    for start_frame in range(0, total_frames, int(fps * segment_duration)):
+        if segment_count >= max_segments:
+            break  # Stop after reaching 30 segments
+        
+        end_frame = min(start_frame + int(fps * segment_duration), total_frames)
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-        output_path = os.path.join(output_dir, f"{video_filename}_segment_{i + 1}.mp4")
+        output_path = os.path.join(output_dir, f"{video_filename}_segment_{segment_count + 1}.mp4")
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_path, fourcc, fps, (int(cap.get(3)), int(cap.get(4))))
 
@@ -44,45 +39,55 @@ def segment_clips(video_path, shot_boundaries, output_dir):
             out.write(frame)
 
         out.release()
-        logging.info(f"Segment {i + 1} saved to {output_path}")
+        segment_count += 1
+        logging.info(f"Segment {segment_count} saved to {output_path}")
 
     cap.release()
-    logging.info("Completed video segmentation")
+    logging.info(f"Completed video segmentation. Total segments created: {segment_count}")
 
-# Extract audio segments based on shot boundaries
-def extract_audio_segments(video_path, shot_boundaries, output_dir):
+
+def extract_audio_segments(video_path, output_dir, segment_duration=60, max_segments=30):
     """
-    Extracts audio segments from the video based on shot boundaries.
-    Args:
-        video_path (str): Path to the original video file.
-        shot_boundaries (list): List of frame indices where shots begin.
-        output_dir (str): Directory to save audio segments.
+    Extracts 1-minute audio segments from the video, limiting to 30 segments.
     """
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    y, sr = librosa.load(video_path, sr=None, mono=True)
+    video_clip = VideoFileClip(video_path)
+    audio = video_clip.audio
     video_filename = os.path.splitext(os.path.basename(video_path))[0]
+    total_duration = video_clip.duration
 
-    for i, boundary in enumerate(shot_boundaries[:-1]):
-        start_frame = boundary
-        end_frame = shot_boundaries[i + 1]
-        start_time = start_frame / sr
-        end_time = end_frame / sr
+    segment_count = 0
+    for start_time in range(0, int(total_duration), segment_duration):
+        if segment_count >= max_segments:
+            break  # Stop after 30 segments
+        
+        end_time = min(start_time + segment_duration, total_duration)
+        audio_segment = audio.subclip(start_time, end_time)
+        output_path = os.path.join(output_dir, f"{video_filename}_audio_segment_{segment_count + 1}.wav")
+        audio_segment.write_audiofile(output_path)
+        
+        segment_count += 1
+        logging.info(f"Audio segment {segment_count} saved to {output_path}")
 
-        audio_segment = y[int(start_time * sr):int(end_time * sr)]
-        output_path = os.path.join(output_dir, f"{video_filename}_audio_segment_{i + 1}.wav")
-        librosa.output.write_wav(output_path, audio_segment, sr)
-        logging.info(f"Audio segment {i + 1} saved to {output_path}")
+def process_video_for_action_detection(video_path, output_dir):
+    """
+    Processes video for action detection by segmenting video and extracting audio.
+    """
+    video_segments_dir = os.path.join(output_dir, "video_segments")
+    audio_segments_dir = os.path.join(output_dir, "audio_segments")
 
-# Combine segmented video and audio into final clips
+    # Segment video and extract audio (limit to 30 segments)
+    segment_clips(video_path, video_segments_dir)
+    extract_audio_segments(video_path, audio_segments_dir)
+
+    logging.info("Video processing for action detection completed.")
+
+
 def combine_video_audio(video_dir, audio_dir, output_dir):
     """
-    Combines segmented video and audio files into final video clips.
-    Args:
-        video_dir (str): Directory containing video segments.
-        audio_dir (str): Directory containing audio segments.
-        output_dir (str): Directory to save final combined video-audio clips.
+    Combines segmented video and audio files into final 1-minute clips.
     """
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
