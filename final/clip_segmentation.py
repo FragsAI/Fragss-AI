@@ -114,5 +114,3 @@ def combine_video_audio(video_dir, audio_dir, output_dir):
         final_clip.write_videofile(output_path, codec='libx264')
         logging.info(f"Combined video-audio clip saved to {output_path}")
 
-if __name__=='__main__':
-    segment_clips(video_path='/Users/parvathyuk/Desktop/Frags/new_seg.mp4',output_dir='./tots')
