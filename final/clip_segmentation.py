@@ -1,6 +1,7 @@
 import os
 import logging
 import cv2
+import random
 import librosa
 from moviepy.editor import VideoFileClip, AudioFileClip
 from tqdm import tqdm
@@ -16,18 +17,23 @@ def segment_clips(video_path, output_dir, segment_duration=60, max_segments=30):
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration=total_frames/fps
+    total_segments=int(duration//segment_duration)
+    possible_segments=list(range(total_segments))
+
+    random.shuffle(possible_segments)
+    selected_segments=possible_segments[:max_segments]
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     logging.info("Starting video segmentation")
     segment_count = 0
-    for start_frame in range(0, total_frames, int(fps * segment_duration)):
-        if segment_count >= max_segments:
-            break  # Stop after reaching 30 segments
-        
-        end_frame = min(start_frame + int(fps * segment_duration), total_frames)
+    for seg_index in selected_segments:
+        start_frame=int(seg_index*segment_duration*fps)
+        end_frame = min(start_frame + int(fps * segment_duration),total_frames)
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        
         output_path = os.path.join(output_dir, f"{video_filename}_segment_{segment_count + 1}.mp4")
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_path, fourcc, fps, (int(cap.get(3)), int(cap.get(4))))
@@ -107,3 +113,6 @@ def combine_video_audio(video_dir, audio_dir, output_dir):
 
         final_clip.write_videofile(output_path, codec='libx264')
         logging.info(f"Combined video-audio clip saved to {output_path}")
+
+if __name__=='__main__':
+    segment_clips(video_path='/Users/parvathyuk/Desktop/Frags/new_seg.mp4',output_dir='./tots')
