@@ -20,6 +20,9 @@ from faster_whisper import WhisperModel
 import pysrt
 import math
 
+from final.subtitles import apply_subtitles_to_clips
+from final.transcription import transcribe_video
+
 import warnings
 warnings.filterwarnings('ignore',category=UserWarning, module="moviepy")
 
@@ -355,29 +358,32 @@ def process_videos_in_folder(output_dir):
     return sorted_video_scores
 
 # Main function to process video
-def main(MODEL_PATH, video_path, model_size='small', device='cpu', output_dir="output", num_clips=10, clip_length=15):
+def main(MODEL_PATH, video_path, font_color, font_type, transcription, model_size='small', device='cpu', output_dir="output", num_clips=10, clip_length=15):
     audio, sr = extract_audio(video_path)
     loudest_times = audio_detection(audio, sr, num_clips=num_clips, clip_length=clip_length)
     clips = segment_video(video_path, loudest_times, segment_duration=clip_length)
     save_clips(clips, output_dir)
     clip_scores = process_videos_in_folder(output_dir)
 
-    for clip_path, score in clip_scores:
-        extracted_audio = extract_audio_ffmpeg(os.path.join(output_dir, clip_path))
-        if extracted_audio:
-            language, segments = transcribe_audio(extracted_audio, model_size, device)
-            if language and segments:
-                enhanced_video = enhance_video_with_aspect_ratio(os.path.join(output_dir, clip_path), os.path.join(output_dir, f"enhanced-{clip_path}"), width=1280)
-                if enhanced_video:
-                    subtitle_file = generate_subtitle_file(input_video=enhanced_video,language=language, segments=segments)
-                    if subtitle_file:
-                        add_subtitle_to_video(video_file=enhanced_video, subtitle_file=subtitle_file, audio_file=extracted_audio)
+    # Apply Users Selections
+    if transcription:
+        logging.info("Transcribing video...")
+        transcriptions = [transcribe_video(os.path.join(output_dir, clip_path), output_dir="transcriptions") for clip_path, sr in clip_scores]
+        
+    if font_type and font_color:
+        logging.info("Applying subtitles...")
+        clip_paths =  [os.path.join(output_dir, clip_path) for clip_path, _ in clip_scores]
+        apply_subtitles_to_clips(clip_paths=clip_paths, font=font_type, color=font_color)
+                        
     for clip_path, score in clip_scores:  
         logging.info(f"Clip: {clip_path}, Virality Score: {score}")
 
 if __name__ == "__main__":
     MODEL_PATH = 'Model___Date_Time_2024_07_13__17_00_43___Loss_0.12093261629343033___Accuracy_0.9838709831237793.h5'
-    video_path = 'cod_Amaanfile.mp4' # Adjust path to your video
-    model_size = input("Input model size ('tiny' or 'small' or 'large-v3'): ")
-    device =     input("Input device ('cpu' or 'cuda'): ")
-    main(MODEL_PATH,video_path, model_size, device)
+    video_path = 'uploads/videoplayback (online-video-cutter.com).mp4' # Adjust name of your file
+    model_size =    input("Input model size ('tiny' or 'small' or 'large-v3'): ")
+    device =        input("Input device ('cpu' or 'cuda'): ")
+    transcription = input("Enable transcription? Yes/No: ") == "Yes"
+    font_color =    input("Input subtitles' font color: ")
+    font_type =     input("Input subtitles' font type: ")
+    main(MODEL_PATH, video_path, font_color, font_type, transcription, model_size, device)
