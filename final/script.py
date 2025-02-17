@@ -4,7 +4,7 @@ client = OpenAI(api_key="")
 
 def generate_script(prompt):
     response = client.chat.completions.create(
-        model="gpt-3.5-turbo",  # or your preferred model
+        model="gpt-4",  # or your preferred model
         messages=[
             {"role": "user", "content": prompt}
         ],
@@ -22,6 +22,5 @@ def generate_stream_script(prompt):
     return f"Title: {title}\n\nScript:\n{script}"
 
 # Example usage
-title, script = generate_stream_script("CS 2 gaming stream highlight")  # Example, change to your preference
-print("Title: ", title)
-print("Script: ", script)
+# script = generate_stream_script("CS 2 gaming stream highlight")  # Example, change to your preference
+# print("Script: ", script)

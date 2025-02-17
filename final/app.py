@@ -2,19 +2,19 @@ from flask import Flask, request, render_template, redirect, url_for
 import os
 import joblib
 import logging
-from preprocessing import preprocess_video_pipeline
-from action_detection import extract_features
-from audio_analysis import audio_analysis_pipeline
-from shot_detection import detect_shot_boundaries
+from final.preprocessing import preprocess_video_pipeline
+from final.action_detection import extract_features
+from final.audio_analysis import audio_analysis_pipeline
+from final.shot_detection import detect_shot_boundaries
 from clip_segmentation import segment_clips, extract_audio_segments, combine_video_audio
-from virality_ranking import rank_clips, load_action_model
-from subtitles import apply_subtitles_to_clips
-from editing import edit_video
-from background import generate_background
-from voiceover import generate_voiceover
-from aspect_ratio import enhance_video_aspect_ratio
-from transcription import transcribe_video
-from script import generate_stream_script
+from final.virality_ranking import rank_clips, load_action_model
+from final.subtitles import apply_subtitles_to_clips
+from final.editing import edit_video
+from final.background import generate_background
+from final.voiceover import generate_voiceover
+from final.aspect_ratio import enhance_video_aspect_ratio
+from final.transcription import transcribe_video
+from final.script import generate_stream_script
 
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
@@ -35,6 +35,12 @@ logging.basicConfig(level=logging.INFO)
 @app.route("/", methods=["GET", "POST"])
 def upload_video():
     if request.method == "POST":
+        
+        # User Script Generator
+        script_generation = request.form.get("script_generation")
+        if script_generation:
+            return redirect(url_for('process_video', script_generation=script_generation))
+        
         # Save user settings
         user_options = {
             "font": request.form.get("font"),
@@ -44,7 +50,6 @@ def upload_video():
             "voiceover_text": request.form.get("voiceover_text"),
             "aspect_ratio": "aspect_ratio" in request.form,
             "transcription": "transcription" in request.form,
-            "script_generation": "script_generation" in request.form
         }
 
         file = request.files['file']
@@ -57,6 +62,17 @@ def upload_video():
 
 @app.route("/process", methods=["GET"])
 def process_video():
+    
+    script_generation = request.args.get("script_generation")
+    
+    # Use Script Generator
+    if script_generation:
+        script = generate_stream_script(script_generation)
+        return render_template(
+            "process.html",
+            script=script
+        )
+    
     # Retrieve processing options
     processed_output = request.args.get('processed_output')
     font = request.args.get("font")
@@ -66,7 +82,6 @@ def process_video():
     voiceover_text = request.args.get("voiceover_text")
     aspect_ratio = request.args.get("aspect_ratio") == "True"
     transcription = request.args.get("transcription") == "True"
-    script_generation = request.args.get("script_generation") == "True"
     
     if processed_output:
         logging.info("Step 2: Action Detection")
@@ -89,10 +104,6 @@ def process_video():
         if transcription:
             logging.info("Transcribing video...")
             transcriptions = [transcribe_video(clip, output_dir="transcriptions") for clip in clip_paths]
-        
-        if script_generation:
-            logging.info("Generating scripts...")
-            scripts = [generate_stream_script(f"Generate a script for {clip}") for clip in clip_paths]
         
         if font and color:
             logging.info("Applying subtitles...")
@@ -124,7 +135,8 @@ def process_video():
         
         # Render results
         return render_template(
-            "process.html", 
+            "process.html",
+            script=script,
             actions=actions_detected, 
             audio=audio_analysis_results, 
             shots=shot_boundaries, 
