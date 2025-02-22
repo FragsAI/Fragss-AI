@@ -1,12 +1,19 @@
-
 import cv2
+import os
+import gc
 import numpy as np
 import logging
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
+import moviepy
+from PIL import Image
+from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
+from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, AudioFileClip
+from moviepy.config import change_settings
+from pathlib import Path
 
 import preprocessing_final_v2 
-from preprocessing_final_v2 import (adjust_sample_interval, determine_chunk_size, frame_generator_v2, 
+from preprocessing_final_v2 import (adjust_sample_interval, determine_chunk_size, extract_frames_v2, frame_generator_v2, 
                                 convert_to_grayscale_v2, apply_augmentations_v2, process_frames_v2) 
 
 # Set up logging
@@ -163,41 +170,6 @@ def process_shot_detection_v2(frames_batch_folder, indices_batch_folder, output_
         np.save(output_file, np.array(batch_shot_boundaries_array, dtype=np.int32))
         logging.info(f"Indices of frames with shot boundaries saved to {output_file}")
 
-def time_stams_by_index(video_path):
-    """
-    Generates dictonary of frames and timestamps; frame numbers as key and time stamps as value
-    args:
-    video_path: your video file
-    """
-    cap = cv2.VideoCapture(video_path)
-    frame_num = 0
-    frame_wise_timestamps={}
-    while(cap.isOpened()):
-        frame_exists, curr_frame = cap.read()
-        if frame_exists:
-            prev_time_stamp=cap.get(cv2.CAP_PROP_POS_MSEC)
-            print("frame no. " + str(frame_num) + " timestamp is: ", str(prev_time_stamp))
-            frame_wise_timestamps[frame_num]=prev_time_stamp
-        else:
-            break
-        frame_num += 1
-    
-    cap.release()
-    return frame_wise_timestamps
-    
-def generate_clip(video_path, output_dir, from_index ,start_time, end_time):
-    """
-    Generates video clips based shot boundary index
-    """
-    video_name = [ i for i in video_path.split('\\') if i.endswith(('.mp4','.avi'))][0][:-4]
-    file_name = os.path.join(output_dir, f'{video_name}_from_{from_index}.avi') 
-    video = VideoFileClip(video_path)
-    clip=video.subclip(start_time, end_time)
-    logging.info(f"Generating clip...")
-    clip.write_videofile(file_name,codec="libx264")
-    logging.info(f"Clip saved as '{file_name}'")
-
-
 def fetch_indices_batch(batch_num, indices_batch_folder):
     """
     Fetches shot boundary indices
@@ -207,21 +179,57 @@ def fetch_indices_batch(batch_num, indices_batch_folder):
     """
     indices_batch_file=(os.path.join(indices_batch_folder, f"Indices_batch_000{batch_num}.npy") 
                         if Path(os.path.join(indices_batch_folder, f"Indices_batch_000{batch_num}.npy")).is_file() 
-                        else os.path.join(indices_batch_folder,f"shot_boundaries_batch_{batch_num}.npy"))   
+                        else os.path.join(indices_batch_folder,f"shot_boundaries_batch_{batch_num}.npy"))
     print(f"Loading batch: {indices_batch_file}.", end= ' ')
     frames_indices_batch = np.load(indices_batch_file)
     print(f"No.of indices: {frames_indices_batch.shape[0]}")
     return frames_indices_batch
      
+
+def time_stams_by_index(video_path):
+    """
+    Generates dictonary of frames and timestamps; frame numbers as key and time stamps as value
+    args:
+    video_path: your video file
+    """
+    cap = cv2.VideoCapture(video_path)
+    frame_num = 0
+    frame_wise_timestamps={}
+    logging.info('Extracting time stamps...')
+    while(cap.isOpened()):
+        frame_exists, curr_frame = cap.read()
+        if frame_exists:
+            prev_time_stamp=cap.get(cv2.CAP_PROP_POS_MSEC)
+            # print("frame no. " + str(frame_num) + " timestamp is: ", str(prev_time_stamp))
+            frame_wise_timestamps[frame_num]=prev_time_stamp
+        else:
+            break
+        frame_num += 1
+    
+    cap.release()
+    logging.info(f"Process completed. {len(frame_wise_timestamps)} time stamps extracted")
+    return frame_wise_timestamps
+    
+def generate_clip(video_path, output_dir, from_index ,start_time, end_time):
+    """
+    Generates video clips based shot boundary index
+    """
+    video_name = [ i for i in video_path.split('\\') if i.endswith(('.mp4','.avi'))][0][:-4]
+    file_name = os.path.join(output_dir, f'{video_name}_from_{from_index}.mp4') 
+    video = VideoFileClip(video_path)
+    clip=video.subclip(start_time, end_time)
+    logging.info(f"Generating clip from shot boundary {from_index}...")
+    clip.write_videofile(file_name,codec="libx264")
+    logging.info(f"Clip saved as '{file_name}'")
+
 def main():
-    # Generate and Extract frames from video path
-    video_path = r"video.mp4" #your video
+    video_path = r"C:\Users\video.mp4" #your video
     output_dir = r"C:\Users\FramesGenerated" # directory to save generated batches of frames
     indices_output_dir=r"C:\Users\IndicesBatches" # directory to save batches of frame indices
     gray_scaled_frames_dir = r"C:\Users\GrayFrames" # directory to save gray scaled batches of frames
     
-    shot_boundary_batch_dir = r"C:\Users\ShotBoundaryBatches" # directory to save batches of frames indices with shot boundary
-
+    shot_boundary_batch_dir=r"C:\Users\ShotBoundaryBatches" # directory to save batches of frames indices with shot boundary
+    
     sample_interval = adjust_sample_interval(video_path) 
     chunk_size = determine_chunk_size() #No.of frames per batch
     
@@ -235,20 +243,20 @@ def main():
     shot_boundaries = process_shot_detection_v2(frames_batch_folder = gray_scaled_frames_dir, indices_batch_folder = indices_output_dir, output_file = shot_boundary_batch_dir)
 
     #cacluate frame wise timestamps 
-    timestamps=time_stamps_by_index_v2(video_path)    
+    timestamps=time_stams_by_index(video_path)    
     
     #Fetch list of shot boundary indices of batch
-    shot_boundaries= fetch_indices_batch(batch_num, indices_batch_folder=shot_boundary_batch_dir)    
+    batch_num=1 # adjust to required batch number
+    shot_boundary_indices= fetch_indices_batch(batch_num, indices_batch_folder=shot_boundary_batch_dir)    
     
     #calculate start and end time for clip generation
     start_index = 0 #adjust as per requirement
     end_index = 10 #adjust as per requirement
-    starttime=timestamps[shot_boundaries[start_index]]/1000
-    endtime=timestamps[shot_boundaries[end_index]]/1000 
+    starttime=timestamps[shot_boundary_indices[start_index]]/1000
+    endtime=timestamps[shot_boundary_indices[end_index]]/1000 
     
-    output_dir_clips = r"C:\Users\ShotBoundaryClips" #Dirctory to save clips
-    generate_clip(video_path, output_dir=output_dir_clips, from_index=shot_boundaries[start_index],start_time=starttime, end_time=endtime)   
-    
+    output_dir_clips = r"C:\Users\ShotBoundaryClips" #Dirctory to save clips #end_time 120+start time  for 2 min clip
+    generate_clip(video_path, output_dir=output_dir_clips, from_index=shot_boundaries[start_index],start_time=starttime, end_time=starttime+120)
+
 if __name__ =="__main__":
     main()
-
