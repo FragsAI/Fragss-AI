@@ -22,6 +22,7 @@ import math
 
 from final.subtitles import apply_subtitles_to_clips
 from final.transcription import transcribe_video
+from thumbnail_generator.generate_thumbnail import generate_video_thumbnail, add_text_and_icon
 
 import warnings
 warnings.filterwarnings('ignore',category=UserWarning, module="moviepy")
@@ -358,7 +359,7 @@ def process_videos_in_folder(output_dir):
     return sorted_video_scores
 
 # Main function to process video
-def main(MODEL_PATH, video_path, font_color, font_type, transcription, model_size='small', device='cpu', output_dir="output", num_clips=10, clip_length=15):
+def main(MODEL_PATH, video_path, font_color, font_type, transcription, generate_thumbnail, model_size='small', device='cpu', output_dir="output", num_clips=10, clip_length=15):
     audio, sr = extract_audio(video_path)
     loudest_times = audio_detection(audio, sr, num_clips=num_clips, clip_length=clip_length)
     clips = segment_video(video_path, loudest_times, segment_duration=clip_length)
@@ -370,10 +371,34 @@ def main(MODEL_PATH, video_path, font_color, font_type, transcription, model_siz
         logging.info("Transcribing video...")
         transcriptions = [transcribe_video(os.path.join(output_dir, clip_path), output_dir="transcriptions") for clip_path, sr in clip_scores]
         
-    if font_type and font_color:
-        logging.info("Applying subtitles...")
-        clip_paths =  [os.path.join(output_dir, clip_path) for clip_path, _ in clip_scores]
-        apply_subtitles_to_clips(clip_paths=clip_paths, font=font_type, color=font_color)
+    # if font_type and font_color:
+    #     logging.info("Applying subtitles...")
+    #     clip_paths =  [os.path.join(output_dir, clip_path) for clip_path, _ in clip_scores]
+    #     apply_subtitles_to_clips(clip_paths=clip_paths, font=font_type, color=font_color)
+        
+    if generate_thumbnail:
+        
+        logging.info("Generating thumbnail...")
+        thumbnail_background = generate_video_thumbnail(video_path, output_dir)
+        # Mock the options as separate dictionaries
+        text_opts = {
+            "text": "Custom Thumbnail",
+            "font": cv2.FONT_HERSHEY_SIMPLEX,
+            "font_scale": 2,
+            "font_thickness": 5,
+            "text_color": (255, 255, 255),
+            "shadow_color": (0, 0, 0),
+            "position": (50, 100)
+        }
+        icon_opts = {
+            "icon_type": "play",
+            "size": 100,
+            "position": (100, 100),
+            "color": (255, 255, 255)
+        }
+        thumbnail = add_text_and_icon(image_path=thumbnail_background, text_options=text_opts, icon_options=icon_opts)
+
+        logging.info(f"Thumbnail generated at: {thumbnail}")
                         
     for clip_path, score in clip_scores:  
         logging.info(f"Clip: {clip_path}, Virality Score: {score}")
@@ -386,4 +411,5 @@ if __name__ == "__main__":
     transcription = input("Enable transcription? Yes/No: ") == "Yes"
     font_color =    input("Input subtitles' font color: ")
     font_type =     input("Input subtitles' font type: ")
-    main(MODEL_PATH, video_path, font_color, font_type, transcription, model_size, device)
+    generate_thumbnail = input("Generate thumbnail? Yes/No: ") == "Yes"
+    main(MODEL_PATH, video_path, font_color, font_type, transcription, generate_thumbnail, model_size, device)

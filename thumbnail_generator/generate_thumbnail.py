@@ -1,4 +1,5 @@
 import cv2
+import numpy as np
 import os
 
 def generate_video_thumbnail(video_path, output_path, time_sec=0, thumbnail_size=(1280, 720)):
@@ -7,16 +8,23 @@ def generate_video_thumbnail(video_path, output_path, time_sec=0, thumbnail_size
     success, frame = cap.read()
     
     if success:
-        thumbnail = cv2.resize(frame, thumbnail_size)
-        cv2.imwrite(output_path, thumbnail)
+        thumbnail_background = cv2.resize(frame, thumbnail_size)
+        thumbnail_background_path = os.path.join(output_path, "thumbnail_background.jpg")
+        cv2.imwrite(thumbnail_background_path, thumbnail_background)
         print(f"Thumbnail generated at: {output_path}")
-        return output_path    
+        return thumbnail_background_path    
 
     else:
         print("Error generating thumbnail")
         return None
 
-def add_text_and_icon(image, text_options=None, icon_options=None):
+def add_text_and_icon(image_path, text_options=None, icon_options=None):
+    image = cv2.imread(image_path)
+    
+    if image is None:
+        print("Error loading image")
+        return None
+    
     if text_options:
         text = text_options.get("text", "Default Title")
         font = text_options.get("font", cv2.FONT_HERSHEY_SIMPLEX)
@@ -51,7 +59,7 @@ def add_text_and_icon(image, text_options=None, icon_options=None):
             bottom_right = (center_x + icon_size // 2, center_y + icon_size // 2)
             cv2.rectangle(image, top_left, bottom_right, icon_color, -1)
 
-    return image
+    return cv2.imwrite(image_path.replace('_background', ''), image)
 
 if __name__ == '__main__':
     video_path = "uploads/videoplayback (online-video-cutter.com).mp4"
