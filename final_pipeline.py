@@ -22,7 +22,7 @@ import math
 
 from final.subtitles import apply_subtitles_to_clips
 from final.transcription import transcribe_video
-from thumbnail_generator.generate_thumbnail import generate_video_thumbnail, add_text_and_icon
+from thumbnail_generator.generate_thumbnail import generate_thumbnail_background_from_selected_timestap, add_text_and_icon, select_timestamp_best_frame, generate_thumbnail_options
 
 import warnings
 warnings.filterwarnings('ignore',category=UserWarning, module="moviepy")
@@ -359,7 +359,7 @@ def process_videos_in_folder(output_dir):
     return sorted_video_scores
 
 # Main function to process video
-def main(MODEL_PATH, video_path, font_color, font_type, transcription, generate_thumbnail, model_size='small', device='cpu', output_dir="output", num_clips=10, clip_length=15):
+def main(MODEL_PATH, video_path, font_color, font_type, transcription, generate_thumbnail, prompt, model_size='small', device='cpu', output_dir="output", num_clips=10, clip_length=15):
     audio, sr = extract_audio(video_path)
     loudest_times = audio_detection(audio, sr, num_clips=num_clips, clip_length=clip_length)
     clips = segment_video(video_path, loudest_times, segment_duration=clip_length)
@@ -367,9 +367,9 @@ def main(MODEL_PATH, video_path, font_color, font_type, transcription, generate_
     clip_scores = process_videos_in_folder(output_dir)
 
     # Apply Users Selections
-    if transcription:
-        logging.info("Transcribing video...")
-        transcriptions = [transcribe_video(os.path.join(output_dir, clip_path), output_dir="transcriptions") for clip_path, sr in clip_scores]
+    # if transcription:
+    #     logging.info("Transcribing video...")
+    #     transcriptions = [transcribe_video(os.path.join(output_dir, clip_path), output_dir="transcriptions") for clip_path, sr in clip_scores]
         
     # if font_type and font_color:
     #     logging.info("Applying subtitles...")
@@ -379,26 +379,12 @@ def main(MODEL_PATH, video_path, font_color, font_type, transcription, generate_
     if generate_thumbnail:
         
         logging.info("Generating thumbnail...")
-        thumbnail_background = generate_video_thumbnail(video_path, output_dir)
-        # Mock the options as separate dictionaries
-        text_opts = {
-            "text": "Custom Thumbnail",
-            "font": cv2.FONT_HERSHEY_SIMPLEX,
-            "font_scale": 2,
-            "font_thickness": 5,
-            "text_color": (255, 255, 255),
-            "shadow_color": (0, 0, 0),
-            "position": (50, 100)
-        }
-        icon_opts = {
-            "icon_type": "play",
-            "size": 100,
-            "position": (100, 100),
-            "color": (255, 255, 255)
-        }
-        thumbnail = add_text_and_icon(image_path=thumbnail_background, text_options=text_opts, icon_options=icon_opts)
-
-        logging.info(f"Thumbnail generated at: {thumbnail}")
+        selected_timestamps = [select_timestamp_best_frame(os.path.join(output_dir, clip_path)) for clip_path, virality_score in clip_scores]
+        thumbnail_backgrounds = [generate_thumbnail_background_from_selected_timestap(clip_path, output_dir, selected_timestamp) for clip_path, selected_timestamp in selected_timestamps]
+        text_opts, icon_opts = generate_thumbnail_options(prompt)
+        thumbnail_paths = [add_text_and_icon(image_path=thumbnail_background, text_options=text_opts, icon_options=icon_opts) for thumbnail_background in thumbnail_backgrounds]
+        for thumbnail in thumbnail_paths:
+            logging.info(f"Thumbnail generated at: {thumbnail}")
                         
     for clip_path, score in clip_scores:  
         logging.info(f"Clip: {clip_path}, Virality Score: {score}")
@@ -412,4 +398,5 @@ if __name__ == "__main__":
     font_color =    input("Input subtitles' font color: ")
     font_type =     input("Input subtitles' font type: ")
     generate_thumbnail = input("Generate thumbnail? Yes/No: ") == "Yes"
-    main(MODEL_PATH, video_path, font_color, font_type, transcription, generate_thumbnail, model_size, device)
+    thumbnail_option_prompt = input("Prompt for text and icon automation using AI?: ")
+    main(MODEL_PATH, video_path, font_color, font_type, transcription, generate_thumbnail, thumbnail_option_prompt, model_size, device)
