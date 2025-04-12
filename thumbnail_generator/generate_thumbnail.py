@@ -7,9 +7,22 @@ from moviepy.editor import *
 
 from virality_model.predict_virality import extract_frames, predict_actions
 
+# Initialize OpenAI client
 client = OpenAI(api_key="")
 
-def generate_thumbnail_background_from_selected_timestap(video_path, output_path, time_sec=7, thumbnail_size=(1280, 720)):
+def generate_thumbnail_background_from_selected_timestamp(video_path, output_path, time_sec=7, thumbnail_size=(1280, 720)):
+    """
+    Extract a frame from the video at a specific timestamp and save it as a thumbnail background.
+    
+    Args:
+        video_path: Path to the video file
+        output_path: Path to save the output thumbnail
+        time_sec: Time in seconds to extract the frame from
+        thumbnail_size: Size of the thumbnail (width, height)
+        
+    Returns:
+        Path to the saved thumbnail background or None if failed
+    """
     cap = cv2.VideoCapture(video_path)
     cap.set(cv2.CAP_PROP_POS_MSEC, time_sec * 1000)
     success, frame = cap.read()
@@ -20,16 +33,24 @@ def generate_thumbnail_background_from_selected_timestap(video_path, output_path
         cv2.imwrite(thumbnail_background_path, thumbnail_background)
         print(f"Thumbnail background generated at: {thumbnail_background_path}")
         return thumbnail_background_path    
-
     else:
         print("Error generating thumbnail background")
         return None
     
 def select_timestamp_best_frame(clip_path):
+    """
+    Select the best frame from a video clip based on action prediction confidence.
+    
+    Args:
+        clip_path: Path to the video clip
+        
+    Returns:
+        Tuple of (clip_path, best_frame_index)
+    """
     frames = np.array(extract_frames(clip_path))
     predictions = predict_actions(frames)
 
-    # Verify predictions shape explicitly:
+    # Verify predictions shape explicitly
     predictions = np.array(predictions)
     print(f"Predictions shape: {predictions.shape}")
     frame_confidences = np.max(predictions, axis=1)
@@ -38,12 +59,21 @@ def select_timestamp_best_frame(clip_path):
     return clip_path, best_frame_index
 
 def generate_thumbnail_options(prompt):
+    """
+    Use GPT to generate text and icon options for the thumbnail based on a prompt.
+    
+    Args:
+        prompt: Text prompt for GPT to generate options
+        
+    Returns:
+        Tuple of (text_options, icon_options) dictionaries or (None, None) if failed
+    """
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",  # or use "gpt-4"
         messages=[
             {"role": "system", "content": "Generate structured JSON with keys 'text_options' and 'icon_options' for a video thumbnail. "
-                                        "'text_options' should include cv2 putText params: 'text', 'font_scale', 'font_thickness', 'text_color' (rgb string format), 'shadow_color' (rgb string format), 'position' (text position x and y). "
-                                        "'icon_options' should include cv2 putText tions params: 'icon_type', 'size', 'color (rgb string format)', 'position' (icon center position x and y)."},
+                                         "'text_options' should include cv2 putText params: 'text', 'font_scale', 'font_thickness', 'text_color' (rgb string format), 'shadow_color' (rgb string format), 'position' (text position x and y). "
+                                         "'icon_options' should include cv2 putText params: 'icon_type', 'size', 'color (rgb string format)', 'position' (icon center position x and y)."},
             {"role": "user", "content": prompt}
         ],
         temperature=0.7,
@@ -65,32 +95,47 @@ def generate_thumbnail_options(prompt):
 
 
 def add_text_and_icon(image_path, text_options=None, icon_options=None):
+    """
+    Add text and icon overlays to an image.
+    
+    Args:
+        image_path: Path to the background image
+        text_options: Dictionary with text options
+        icon_options: Dictionary with icon options
+        
+    Returns:
+        True if successful, None if failed
+    """
     image = cv2.imread(image_path)
     
     if image is None:
         print("Error loading image")
         return None
     
+    # Add text overlay if options provided
     if text_options:
         text = text_options.get("text", "Default Title")
         font = text_options.get("font", cv2.FONT_HERSHEY_SIMPLEX)
         font_scale = text_options.get("font_scale", 2)
         font_thickness = text_options.get("font_thickness", 5)
-        text_color = ast.literal_eval(text_options['text_color']) if text_options['text_color'] else (0, 0, 0)
-        shadow_color = ast.literal_eval(text_options['shadow_color']) if text_options['shadow_color'] else (0, 0, 0)
+        text_color = ast.literal_eval(text_options['text_color']) if text_options.get('text_color') else (0, 0, 0)
+        shadow_color = ast.literal_eval(text_options['shadow_color']) if text_options.get('shadow_color') else (0, 0, 0)
         text_x = text_options["position"]['x']
         text_y = text_options["position"]['y']
 
+        # Add shadow effect and then the main text
         cv2.putText(image, text, (text_x + 2, text_y + 2), font, font_scale, shadow_color, font_thickness+2, cv2.LINE_AA)
         cv2.putText(image, text, (text_x, text_y), font, font_scale, text_color, font_thickness, cv2.LINE_AA)
 
+    # Add icon overlay if options provided
     if icon_options:
         icon_type = icon_options.get("icon_type", "play") 
         icon_size = int(icon_options.get("size", 100))
         center_x = icon_options["position"]['x']
         center_y = icon_options["position"]['y']
-        icon_color = ast.literal_eval(icon_options['color']) if icon_options['color'] else (0, 0, 0)
+        icon_color = ast.literal_eval(icon_options['color']) if icon_options.get('color') else (0, 0, 0)
 
+        # Draw different icon types
         if icon_type == "play": 
             pts = np.array([
                 (center_x - icon_size // 2, center_y - icon_size // 2),
@@ -109,25 +154,32 @@ def add_text_and_icon(image_path, text_options=None, icon_options=None):
 
     return cv2.imwrite(image_path.replace('_background', ''), image)
 
+
+# Main execution block
 if __name__ == '__main__':
     video_path = "uploads/videoplayback (online-video-cutter.com).mp4"
     output_path = "thumbnail_custom.jpg"
 
+    # Define text options for the thumbnail
     text_options = {
         "text": "My Custom Video",
         "font": cv2.FONT_HERSHEY_DUPLEX,
         "font_scale": 2.5,
         "font_thickness": 6,
-        "text_color": (255, 255, 0),
-        "shadow_color": (0, 0, 0),
-        "position": (100, 150) 
+        "text_color": "(255, 255, 0)",  # Yellow text
+        "shadow_color": "(0, 0, 0)",    # Black shadow
+        "position": {"x": 100, "y": 150}
     }
 
+    # Define icon options for the thumbnail
     icon_options = {
         "icon_type": "play", 
         "size": 150,
-        "position": (640, 360),
-        "color": (0, 255, 0)
+        "position": {"x": 640, "y": 360},
+        "color": "(0, 255, 0)"  # Green icon
     }
 
-    generate_thumbnail_background_from_selected_timestap(video_path, output_path, time_sec=10, text_options=text_options, icon_options=icon_options)
+    # Generate the thumbnail
+    background_path = generate_thumbnail_background_from_selected_timestamp(video_path, output_path, time_sec=10)
+    if background_path:
+        add_text_and_icon(background_path, text_options, icon_options)
