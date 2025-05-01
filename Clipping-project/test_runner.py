@@ -1,6 +1,6 @@
 import os
 import logging
-from preprocessing_final import extract_frames, process_frames, adjust_sample_interval, determine_chunk_size
+from preprocessing import extract_frames, process_frames, adjust_sample_interval, determine_chunk_size
 from action_detection import extract_features
 from audio_analysis import audio_analysis_pipeline
 from clip_segmentation import segment_video_and_audio
