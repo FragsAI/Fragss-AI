@@ -9,7 +9,6 @@ pydub
 SpeechRecognition
 librosa
 pyAudioAnalysis
-tensorflow
 nltk
 flask
 ffmpeg-python

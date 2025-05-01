@@ -4,7 +4,7 @@ from preprocessing_final import extract_frames, process_frames, adjust_sample_in
 from action_detection import extract_features
 from audio_analysis import audio_analysis_pipeline
 from clip_segmentation import segment_video_and_audio
-from virality_ranking import load_action_model, get_video_clips_from_folder, rank_clips, copy_files
+from virality_ranking import get_video_clips_from_folder, rank_clips, copy_files
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -12,7 +12,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Paths
 UPLOAD_FOLDER = 'uploads'
 VIDEO_FILE = 'my_stream_video.mp4'  # change this to your uploaded file name
-MODEL_PATH = 'models/action_detection_model.h5'  
 OUTPUT_FOLDER = 'output_segments'
 
 if __name__ == "__main__":
@@ -23,11 +22,7 @@ if __name__ == "__main__":
     logging.info("Segmenting the video into clips based on motion detection...")
     segment_video_and_audio(input_video_path, OUTPUT_FOLDER, segment_duration=60, max_segments=30)
 
-    # Step 2: Load action detection model
-    logging.info("Loading action detection model...")
-    model = load_action_model(MODEL_PATH)
-
-    # Step 3: Get all segmented video clips
+    # Step 2: Get all segmented video clips
     video_clips = get_video_clips_from_folder(os.path.join(OUTPUT_FOLDER, "videos"))
 
     if not video_clips:
@@ -36,11 +31,11 @@ if __name__ == "__main__":
 
     logging.info(f"Found {len(video_clips)} video clips for ranking.")
 
-    # Step 4: Rank clips by predicted virality
+    # Step 3: Rank clips by predicted virality (using YOLO detections)
     logging.info("Ranking clips based on predicted virality...")
-    ranked_clips = rank_clips(video_clips, model)
+    ranked_clips = rank_clips(video_clips, None)
 
-    # Step 5: Copy Top 20 Clips to 'clip_virality' folder
+    # Step 4: Copy Top 20 Clips to 'clip_virality' folder
     top_clips = ranked_clips[:20]
     copy_files(top_clips)
 

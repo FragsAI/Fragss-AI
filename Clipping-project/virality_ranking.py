@@ -8,6 +8,7 @@ from tqdm import tqdm
 import concurrent.futures
 from tensorflow.keras.models import load_model
 from scipy.special import softmax
+from action_detection import extract_features
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -77,19 +78,20 @@ def sentiment_analysis(text):
     return vader_analyzer.polarity_scores(text)["compound"]
 
 # Predict Actions
-def predict_actions(frames, model, action_threshold=0.1):
-    features = np.array(frames).reshape(1, TIMESTEPS, IMAGE_HEIGHT, IMAGE_WIDTH, NO_OF_CHANNELS)
-    predictions = model.predict(features).flatten()
-    action_probabilities = softmax(predictions * 5)
-    
-    weighted_action_score = 0
-    for i, prob in enumerate(action_probabilities):
-        if prob > action_threshold:
-            event_name = CLASS_ID_TO_EVENT.get(i, None)
-            if event_name:
-                weighted_action_score += prob * EVENT_WEIGHTS.get(event_name, 0.5)
-    
-    return max(weighted_action_score * 10, 0.1)
+def predict_actions(video_path):
+    detections = extract_features(video_path, frame_rate=5)  # uses YOLO
+    event_count = {}
+
+    for det in detections:
+        event = det['action']
+        if event not in event_count:
+            event_count[event] = 0
+        event_count[event] += 1
+
+    # Weighted score from EVENT_WEIGHTS
+    weighted_action_score = sum(EVENT_WEIGHTS.get(event, 0.5) * count for event, count in event_count.items())
+
+    return max(weighted_action_score, 0.1)
 
 # Compute Virality Score
 def compute_virality_score(sentiment_score, weighted_action_score):
@@ -102,13 +104,19 @@ def compute_virality_score(sentiment_score, weighted_action_score):
     return round(virality_score, 2)
 
 # Predict Virality
-def predict_virality(video_path, action_model):
-    frames = extract_frames(video_path)
-    sentiment_score = 0
-    weighted_action_score = predict_actions(frames, action_model)
-    virality_score = compute_virality_score(sentiment_score, weighted_action_score)
-    logging.info(f"Predicted virality score for {video_path}: {virality_score}")
-    return virality_score
+def predict_virality(video_path):
+    sentiment_score = 0  # Optional, skip for now
+    weighted_action_score = predict_actions(video_path)
+
+    sentiment_weight = 0.1  # Low impact
+    action_weight = 0.9
+    random_variance = np.random.uniform(1.1, 1.3)  # More stable
+
+    virality_score = ((sentiment_weight * sentiment_score) + (action_weight * weighted_action_score)) * random_variance
+    virality_score = np.clip(virality_score, 1.0, 10.0)
+    
+    logging.info(f"Virality score for {video_path}: {virality_score:.2f}")
+    return round(virality_score, 2)
 
 # Rank Clips
 def rank_clips(video_clips, action_model):
