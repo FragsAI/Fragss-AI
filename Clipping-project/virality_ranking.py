@@ -12,6 +12,8 @@ from action_detection import extract_features
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+cfg_path = "D:\Fragss-AI-main\Fragss-AI-main\yolov3.cfg"
+weights_path = "D:\Fragss-AI-main\Fragss-AI-main\yolo.weights"
 
 # Constants
 IMAGE_HEIGHT, IMAGE_WIDTH = 64, 64
@@ -21,6 +23,8 @@ TIMESTEPS = 10
 VIDEO_FOLDER_PATH = "output_segments/videos"
 VIRALITY_FOLDER_PATH = os.path.join(VIDEO_FOLDER_PATH, "clip_virality")
 os.makedirs(VIRALITY_FOLDER_PATH, exist_ok=True)
+YOLO_WEIGHTS = 'yolov3.weights'
+YOLO_CFG = 'yolov3.cfg'
 
 # Mapping from class id to event name
 CLASS_ID_TO_EVENT = {
@@ -77,20 +81,21 @@ def sentiment_analysis(text):
     vader_analyzer = SentimentIntensityAnalyzer()
     return vader_analyzer.polarity_scores(text)["compound"]
 
-# Predict Actions
-def predict_actions(video_path):
-    detections = extract_features(video_path, frame_rate=5)  # uses YOLO
+def predict_actions(video_path, weights_path, cfg_path):
+    detections = extract_features(video_path, weights_path, cfg_path, frame_rate=5)
+    logging.info(f"Detections for {video_path}: {detections}")
+
     event_count = {}
+
+    if not detections:
+        logging.warning(f"No detections found for {video_path}")
+        return 0.5  # fallback
 
     for det in detections:
         event = det['action']
-        if event not in event_count:
-            event_count[event] = 0
-        event_count[event] += 1
+        event_count[event] = event_count.get(event, 0) + 1
 
-    # Weighted score from EVENT_WEIGHTS
     weighted_action_score = sum(EVENT_WEIGHTS.get(event, 0.5) * count for event, count in event_count.items())
-
     return max(weighted_action_score, 0.1)
 
 # Compute Virality Score
@@ -104,48 +109,51 @@ def compute_virality_score(sentiment_score, weighted_action_score):
     return round(virality_score, 2)
 
 # Predict Virality
-def predict_virality(video_path):
+def predict_virality(video_path, config=None):
     sentiment_score = 0  # Optional, skip for now
-    weighted_action_score = predict_actions(video_path)
+    weighted_action_score = predict_actions(video_path, weights_path, cfg_path)
 
-    sentiment_weight = 0.1  # Low impact
+    logging.info(f"Weighted action score for {video_path}: {weighted_action_score}")
+
+    sentiment_weight = 0.1
     action_weight = 0.9
-    random_variance = np.random.uniform(1.1, 1.3)  # More stable
+    random_variance = np.random.uniform(1.1, 1.3)
 
     virality_score = ((sentiment_weight * sentiment_score) + (action_weight * weighted_action_score)) * random_variance
     virality_score = np.clip(virality_score, 1.0, 10.0)
-    
+
     logging.info(f"Virality score for {video_path}: {virality_score:.2f}")
     return round(virality_score, 2)
 
+
 # Rank Clips
-def rank_clips(video_clips, action_model):
-    ranked_clips = []
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = {executor.submit(predict_virality, clip, action_model): clip for clip in video_clips}
-        for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Ranking clips"):
-            clip = futures[future]
-            try:
-                score = future.result()
-                ranked_clips.append((score, clip))
-            except Exception as e:
-                logging.error(f"Error processing video {clip}: {e}")
+def rank_clips(video_paths, model_args):
+    weights_path, cfg_path = model_args
+    ranked = []
+    for path in video_paths:
+        score = predict_virality(path, config={"weights_path": weights_path, "cfg_path": cfg_path})
+        ranked.append((path, score))
+    ranked.sort(key=lambda x: x[1], reverse=True)
+    return ranked
 
-    ranked_clips.sort(reverse=True, key=lambda x: x[0])
-    return ranked_clips
+import shutil
 
-# Copy Files
-def copy_files(ranked_clips):
-    for rank, (score, clip) in enumerate(ranked_clips, start=1):
-        folder, filename = os.path.split(clip)
-        name, ext = os.path.splitext(filename)
-        new_name = f"{rank:02d}_{name}_score_{score:.2f}{ext}"
-        new_path = os.path.join(VIRALITY_FOLDER_PATH, new_name)
+def copy_files(ranked_clip_paths, destination_folder):
+    if not os.path.exists(destination_folder):
+        os.makedirs(destination_folder)
 
-        command = ["ffmpeg", "-i", clip, "-c:v", "copy", "-c:a", "copy", new_path, "-y"]
-        subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for clip_tuple in ranked_clip_paths:
+        # If it's a tuple, extract the path from the first element
+        clip_path = clip_tuple[0] if isinstance(clip_tuple, tuple) else clip_tuple
 
-        logging.info(f"Copied {clip} -> {new_path}")
+        if isinstance(clip_path, (str, bytes, os.PathLike)) and os.path.isfile(clip_path):
+            filename = os.path.basename(clip_path)
+            dest_path = os.path.join(destination_folder, filename)
+            shutil.copy2(clip_path, dest_path)
+            logging.info(f"Copied: {clip_path} → {dest_path}")
+        else:
+            logging.warning(f"Clip not found or invalid path: {clip_path}")
+
 
 # Get video clips from folder
 def get_video_clips_from_folder(folder_path):
