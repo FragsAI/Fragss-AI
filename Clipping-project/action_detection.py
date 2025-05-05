@@ -3,6 +3,9 @@ import cv2
 import numpy as np
 import logging
 from tqdm import tqdm
+cfg_path = "D:\Fragss-AI-main\Fragss-AI-main\yolov3.cfg"
+weights_path = "D:\Fragss-AI-main\Fragss-AI-main\yolo.weights"
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
