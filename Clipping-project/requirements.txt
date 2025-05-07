@@ -1,0 +1,14 @@
+opencv-python
+numpy
+psutil
+albumentations
+scikit-image
+tqdm
+moviepy
+pydub
+SpeechRecognition
+librosa
+pyAudioAnalysis
+nltk
+flask
+ffmpeg-python
