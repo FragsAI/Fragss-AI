@@ -37,7 +37,7 @@ def generate_thumbnail_background_from_selected_timestamp(video_path, output_pat
         print("Error generating thumbnail background")
         return None
     
-def select_timestamp_best_frame(clip_path):
+def select_timestamp_best_frame(video_path):
     """
     Select the best frame from a video clip based on action prediction confidence.
     
@@ -47,16 +47,35 @@ def select_timestamp_best_frame(clip_path):
     Returns:
         Tuple of (clip_path, best_frame_index)
     """
-    frames = np.array(extract_frames(clip_path))
+    frames = np.array(extract_frames(video_path))
     predictions = predict_actions(frames)
 
-    # Verify predictions shape explicitly
     predictions = np.array(predictions)
     print(f"Predictions shape: {predictions.shape}")
     frame_confidences = np.max(predictions, axis=1)
     best_frame_index = np.argmax(frame_confidences)
 
-    return clip_path, best_frame_index
+    return video_path, best_frame_index
+
+def beautify_with_dalle2(background_path, prompt):
+    """
+    Use DALL-E 2 to beautify the image based on a prompt.
+    
+    Args:
+        image_path: Path to the image to be beautified
+        prompt: Text prompt for DALL-E 2
+    """
+    
+def generate_new_background_with_dalle3(background_path, prompt):
+    """
+    Use DALL-E 3 to generate a new background based on a prompt.
+    
+    Args:
+        image_path: Path to the image to be beautified
+        prompt: Text prompt for DALL-E 3
+    """
+    # Placeholder for DALL-E 3 API call
+    pass
 
 def generate_thumbnail_options(prompt):
     """
