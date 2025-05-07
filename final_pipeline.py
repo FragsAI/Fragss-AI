@@ -22,7 +22,7 @@ import math
 
 from final.subtitles import apply_subtitles_to_clips
 from final.transcription import transcribe_video
-from thumbnail_generator.generate_thumbnail import generate_thumbnail_background_from_selected_timestap, add_text_and_icon, select_timestamp_best_frame, generate_thumbnail_options
+from thumbnail_generator.generate_thumbnail import beautify_with_dalle2, generate_new_background_with_dalle3, generate_thumbnail_background_from_selected_timestamp, add_text_and_icon, select_timestamp_best_frame, generate_thumbnail_options
 
 import warnings
 warnings.filterwarnings('ignore',category=UserWarning, module="moviepy")
@@ -359,7 +359,7 @@ def process_videos_in_folder(output_dir):
     return sorted_video_scores
 
 # Main function to process video
-def main(MODEL_PATH, video_path, font_color, font_type, transcription, generate_thumbnail, prompt, model_size='small', device='cpu', output_dir="output", num_clips=10, clip_length=15):
+def main(MODEL_PATH, video_path, font_color, font_type, transcription, generate_thumbnail, model_size='small', device='cpu', output_dir="output", num_clips=10, clip_length=15):
     audio, sr = extract_audio(video_path)
     loudest_times = audio_detection(audio, sr, num_clips=num_clips, clip_length=clip_length)
     clips = segment_video(video_path, loudest_times, segment_duration=clip_length)
@@ -377,14 +377,46 @@ def main(MODEL_PATH, video_path, font_color, font_type, transcription, generate_
     #     apply_subtitles_to_clips(clip_paths=clip_paths, font=font_type, color=font_color)
         
     if generate_thumbnail:
-        
         logging.info("Generating thumbnail...")
-        selected_timestamps = [select_timestamp_best_frame(os.path.join(output_dir, clip_path)) for clip_path, virality_score in clip_scores]
-        thumbnail_backgrounds = [generate_thumbnail_background_from_selected_timestap(clip_path, output_dir, selected_timestamp) for clip_path, selected_timestamp in selected_timestamps]
-        text_opts, icon_opts = generate_thumbnail_options(prompt)
-        thumbnail_paths = [add_text_and_icon(image_path=thumbnail_background, text_options=text_opts, icon_options=icon_opts) for thumbnail_background in thumbnail_backgrounds]
-        for thumbnail in thumbnail_paths:
-            logging.info(f"Thumbnail generated at: {thumbnail}")
+        
+        if generate_thumbnail_from_frame and automatic_frame_selector and automatic_thumbnail_design:
+            # OPTION 1: Automatically select frame and beautify it using DALL·E 2
+            video_path, best_frame_index = select_timestamp_best_frame(video_path)
+            background_path = generate_thumbnail_background_from_selected_timestamp(video_path, output_dir, best_frame_index)
+            beautified_image_path = beautify_with_dalle2(background_path, prompt_for_dalle2)  
+            logging.info(f"Beautified image saved at: {beautified_image_path}")
+
+        elif generate_thumbnail_from_frame and not automatic_frame_selector and automatic_thumbnail_design:
+            # OPTION 2: Manually choose frame from video and apply Dalle-2 design
+            background_path = generate_thumbnail_background_from_selected_timestamp(video_path, output_dir, time_sec=user_selected_time)
+            beautified_image_path = beautify_with_dalle2(background_path, prompt_for_dalle2)  
+            logging.info(f"Beautified image saved at: {beautified_image_path}")
+            
+        elif generate_thumbnail_from_frame and automatic_frame_selector and not automatic_thumbnail_design:
+            # OPTION 3: Automatically select frame and apply manual text and icon using OpenAI API
+            video_path, best_frame_index = select_timestamp_best_frame(video_path)
+            background_path = generate_thumbnail_background_from_selected_timestamp(video_path, output_dir, best_frame_index)
+            text_options, icon_options = generate_thumbnail_options(prompt_for_gpt)
+            beautified_image_path = add_text_and_icon(background_path, text_options, icon_options)
+            logging.info(f"Beautified image saved at: {beautified_image_path}")
+            
+        elif generate_thumbnail_from_frame and not automatic_frame_selector and not automatic_thumbnail_design:
+            # OPTION 4: Manually select frame and apply manual text and icon using OpenAI API
+            background_path = generate_thumbnail_background_from_selected_timestamp(video_path, output_dir, time_sec=user_selected_time)
+            text_options, icon_options = generate_thumbnail_options(prompt_for_gpt)
+            beautified_image_path = add_text_and_icon(background_path, text_options, icon_options)
+            logging.info(f"Beautified image saved at: {beautified_image_path}")
+            
+        elif generate_thumbnail_from_frame and not automatic_frame_selector and not automatic_frame_selector and not generate_thumbnail_design:
+            # OPTION 5: Simply manually select a frame
+            background_path = generate_thumbnail_background_from_selected_timestamp(video_path, output_dir, time_sec=user_selected_time)
+            logging.info(f"Selected frame saved at: {background_path}")
+
+        elif not generate_thumbnail_from_frame:
+            # OPTION 6: Generate entirely new background with DALL·E 3
+            thumbnail_path = generate_new_background_with_dalle3(prompt_for_dalle3) 
+            logging.info(f"Generated new thumbnail saved at: {thumbnail_path}")
+
                         
     for clip_path, score in clip_scores:  
         logging.info(f"Clip: {clip_path}, Virality Score: {score}")
@@ -397,6 +429,37 @@ if __name__ == "__main__":
     transcription = input("Enable transcription? Yes/No: ") == "Yes"
     font_color =    input("Input subtitles' font color: ")
     font_type =     input("Input subtitles' font type: ")
+    
     generate_thumbnail = input("Generate thumbnail? Yes/No: ") == "Yes"
-    thumbnail_option_prompt = input("Prompt for text and icon automation using AI?: ")
-    main(MODEL_PATH, video_path, font_color, font_type, transcription, generate_thumbnail, thumbnail_option_prompt, model_size, device)
+    if generate_thumbnail:
+        generate_thumbnail_from_frame = input("Generate thumbnail from selected frame? Yes/No: ") == "Yes"
+        if generate_thumbnail_from_frame:
+            automatic_frame_selector = input("Automatically generate thumbnail background from video? Yes/No: ") == "Yes"
+            if not automatic_frame_selector:
+                user_selected_time = float(input("Input time in seconds for thumbnail generation: "))
+        else:
+            automatic_frame_selector = False
+        generate_thumbnail_design = input("Generate thumbnail design? Yes/No: ") == "Yes"
+        if generate_thumbnail_design:
+            automatic_thumbnail_design = input("Automatically design thumbnail? Yes/No: ") == "Yes"
+            if automatic_thumbnail_design:
+                prompt_for_dalle2 = input("Prompt for automatic thumbnail generation?: ")
+            else:
+                prompt_for_gpt = input("Prompt for manual thumbnail generation?: ")
+            
+        if not generate_thumbnail_from_frame and not generate_thumbnail_design:
+           prompt_for_dalle3 = input("Prompt for thumbnail generation?: ")
+        
+        generate_thumbnail = {
+            "generate_thumbnail_from_frame": generate_thumbnail_from_frame,
+            "automatic_frame_selector": automatic_frame_selector,
+            "user_selected_time": user_selected_time if not automatic_frame_selector else None,
+            "generate_thumbnail_design": generate_thumbnail_design,
+            "prompt_for_dalle2": prompt_for_dalle2 if automatic_thumbnail_design else None,
+            "prompt_for_gpt": prompt_for_gpt if not automatic_thumbnail_design else None,
+            "prompt_for_dalle3": prompt_for_dalle3
+        }
+    else:
+        generate_thumbnail = None
+        
+    main(MODEL_PATH, video_path, font_color, font_type, transcription, generate_thumbnail, model_size, device)
