@@ -1,3 +1,4 @@
+# Import dependencies
 import os
 import whisper
 from moviepy.editor import VideoFileClip, concatenate_videoclips
@@ -7,73 +8,132 @@ import ast
 import re
 import torch
 from pathlib import Path 
-import os
 import gc
 import numpy as np
-
-# Set up logging
 import logging
+
+# Configure logging to track progress and errors
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Utility function
 def edit_paths(file_path):
-    # Extract filename and extension
-    base_name = os.path.basename(file_path)
-    name, ext = os.path.splitext(base_name)
-    ext = ext.lstrip('.').lower()  # Remove dot and make lowercase
+    """
+    Generates a unique output path for the edited video/audio by appending '_edited_output'.
 
-    # Validate allowed extensions
+    Args:
+        file_path (str): Original file path.
+
+    Returns:
+        str: New unique output path.
+    """
+    base_name = os.path.basename(file_path)  # Extract file name from path
+    name, ext = os.path.splitext(base_name)  # Split name and extension
+    ext = ext.lstrip('.').lower()  # Clean extension
+
     valid_exts = {'mp4', 'avi', 'mp3', 'wav'}
     if ext not in valid_exts:
         raise ValueError(f"Unsupported file extension: .{ext}")
 
-    # Generate new file path
-    dir_name = os.path.dirname(file_path)
-    edited_name = f"{name}_edited_output.{ext}"
-    edited_path = os.path.join(dir_name, edited_name)
+    dir_name = os.path.dirname(file_path)  # Extract directory name
+    edited_name = f"{name}_edited_output.{ext}"  # Create new file name
+    edited_path = os.path.join(dir_name, edited_name) # Join new file name with directory
 
     count = 1
-    while os.path.exists(edited_path):
+    while os.path.exists(edited_path):  # Ensure filename uniqueness
         edited_name = f"{name}_edited_output{count}.{ext}"
         edited_path = os.path.join(dir_name, edited_name)
         count += 1
 
     return edited_path
-   
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-device_name= torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'
 
-# Step 1: Transcribe the Video
+# Step 1: Transcribe video
 def transcribe_video(video_path, model_name='tiny', device='cuda'):
-    video_name = [ i for i in video_path.split('/') if i.endswith(('.mp4','.avi'))][0][:-4]
-    audio_path = f"{video_name}_audio_temp.wav"
-    if os.path.exists(audio_path)==False:  
+    """
+    Transcribes audio from the video using Whisper and stores transcript.
+
+    Args:
+        video_path (str): Path to video file.
+        model_name (str): Whisper model name, e.g. 'tiny'. Other model names- 'base' 'small', 'medium', 'large', 'turbo').
+        device (str): 'cuda' or 'cpu'.
+
+    Returns:
+        list: Transcribed segments with start, end, and text.
+    """
+    video_name = [i for i in video_path.split('/') if i.endswith(('.mp4','.avi'))][0][:-4]  # Extract base name without extension
+    audio_path = f"{video_name}_audio_temp.wav"  # Temporary audio file path
+
+    # Extract audio if not already extracted
+    if not os.path.exists(audio_path):  
         video = VideoFileClip(video_path)
         audio = video.audio
         audio.write_audiofile(audio_path)
     else:
         logging.info(f"File '{audio_path}' already exists. Not overwriting")
-    
-    if os.path.exists(f"{video_name}_transcription_temp.npy")==False:
+
+    # Transcribe step    
+    transcription_file = f"{video_name}_transcription_temp.npy"  # Temp transcription file name
+    if not os.path.exists(transcription_file):  # Only transcribe if not already done
         model = whisper.load_model(model_name, device)
-        audio_path = f"{video_name}_audio_temp.wav"
-        os.system(f"ffmpeg -i {video_path} -ar 16000 -ac 1 -b:a 64k -f mp3 {audio_path}")
-        result = model.transcribe(audio_path)
-        transcription = []
-        for segment in result['segments']:
-            transcription.append({
-                'start': segment['start'],
-                'end': segment['end'],
-                'text': segment['text'].strip()
-            })
-        np.save(f"{video_name}_transcription_temp",np.array(transcription)) 
+        os.system(f"ffmpeg -i {video_path} -ar 16000 -ac 1 -b:a 64k -f mp3 {audio_path}")  # Convert audio format
+        result = model.transcribe(audio_path) # transcribe
+        
+        # Format the transcription output by extracting and cleaning up start time, end time, and text for each segment
+        transcription = [
+            {"start": segment['start'], "end": segment['end'], "text": segment['text'].strip()}
+            for segment in result['segments']
+        ]
+        np.save(transcription_file, np.array(transcription))  # Save transcript
         return transcription
     else:
-        logging.info(f"File '{video_name}_transcription_temp.npy' already exists. Not transcribing.")
-        allow_pickle=True
-        transcription=list(np.load(file=f"{video_name}_transcription_temp.npy", mmap_mode=None, allow_pickle=True, fix_imports=True, encoding='ASCII', max_header_size=10000))
-        return transcription
-         
+        logging.info(f"File '{transcription_file}' already exists. Not transcribing.")
+        return list(np.load(transcription_file, allow_pickle=True))  # Load existing transcription
+
+# Step 2: Split transcript
+def split_transcript(transcript, max_chunk_token_size=3500):
+    """
+    Splits transcript into chunks to respect token limits.
+
+    Args:
+        transcript (list): List of transcript segments.
+        max_chunk_token_size (int): Maximum tokens per chunk.
+
+    Returns:
+        list: List of transcript chunks.
+    """
+    chunks = []  # List to store final chunks
+    current_chunk = []  # Buffer for current chunk
+    current_token_est = 0  # Track token estimate
+
+    for segment in transcript:
+        segment_text = f"{segment}"  # Convert to string
+        segment_token_est = len(segment_text) // 4  # Approx token count
+
+        if current_token_est + segment_token_est > max_chunk_token_size:
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = []
+                current_token_est = 0
+
+        current_chunk.append(segment)
+        current_token_est += segment_token_est
+
+    if current_chunk:  # Add remaining chunk
+        chunks.append(current_chunk)
+
+    return chunks
+
+# Step 3: Get relevant segments
 def get_relevant_segments(transcript, user_query):
+    """
+    Uses Groq API to find video transcript segments relevant to a user query.
+
+    Args:
+        transcript (list): Transcript segments.
+        user_query (str): Search phrase.
+
+    Returns:
+        list: List of relevant segment start-end times.
+    """
     prompt = f"""You are an expert video editor who can read video transcripts and perform video editing. Given a transcript with segments, your task is to identify all the conversations related to a user query. Follow these guidelines when choosing conversations. A group of continuous segments in the transcript is a conversation.
 
 Guidelines:
@@ -93,17 +153,15 @@ User query:
 {user_query}"""
 
     url = "https://api.groq.com/openai/v1/chat/completions"
+    YOUR_API_KEY='your_api_key' # Replace with your API key
     headers = {
         "Content-Type": "application/json",
-        "Authorization": "Bearer YOUR_API_KEY" # Replace with your API key
+        "Authorization": f"Bearer {YOUR_API_KEY}"  # Replace with your API key
     }
 
     data = {
         "messages": [
-            {
-                "role": "system",
-                "content": prompt
-            }
+            {"role": "system", "content": prompt}
         ],
         "model": "llama3-8b-8192",
         "temperature": 1,
@@ -112,15 +170,14 @@ User query:
         "stream": False,
         "stop": None
     }
-    response = requests.post(url, headers=headers, json=data)
-    data = response.json()["choices"][0]["message"]["content"]
+    
+    # Send a POST request to the Groq API with the prompt and input data to retrieve relevant transcript segments
+    response = requests.post(url, headers=headers, json=data) 
+    data = response.json()["choices"][0]["message"]["content"]  # Extract response content
 
-    # Extract the JSON-like part from the string
-    match = re.search(r'\{.*"conversations".*\}', data, re.DOTALL)
+    match = re.search(r'\{.*"conversations".*\}', data, re.DOTALL)  # Find conversation JSON
     if match:
-        json_string = match.group(0)
-        # Convert to dictionary safely
-        conversations = ast.literal_eval(json_string)["conversations"]
+        conversations = ast.literal_eval(match.group(0))["conversations"]  # Parse JSON safely
         for conv in conversations:
             conv['start'] = float(conv['start'])
             conv['end'] = float(conv['end'])
@@ -128,101 +185,75 @@ User query:
         return conversations
     else:
         logging.info("No valid JSON structure found.")
+        return None
 
-def split_transcript(transcript, max_chunk_token_size=3500):
-    chunks = []
-    current_chunk = []
-    current_token_est = 0
-
-    for segment in transcript:
-        segment_text = f"{segment}"
-        segment_token_est = len(segment_text) // 4  # rough token estimate
-
-        if current_token_est + segment_token_est > max_chunk_token_size:
-            if current_chunk:
-                chunks.append(current_chunk)
-                current_chunk = []
-                current_token_est = 0
-
-        current_chunk.append(segment)
-        current_token_est += segment_token_est
-
-    if current_chunk:
-        chunks.append(current_chunk)
-
-    return chunks
-
-
-
+# Step 4: Edit video
 def edit_video(original_video_path, segments, fade_duration=0.5):
-    output_video_path=edit_paths(original_video_path)
-    video = VideoFileClip(original_video_path)
-    clips = []
+    """
+    Extracts and concatenates video clips from relevant segments.
+
+    Args:
+        original_video_path (str): Path to original video.
+        segments (list): List of {start, end} dicts.
+        fade_duration (float): Duration of fadein/fadeout in seconds.
+    """
+    output_video_path = edit_paths(original_video_path)  # Create output path
+    video = VideoFileClip(original_video_path)  # Load video
+    clips = []  # Store relevant subclips
+
     for seg in segments:
-        start = seg['start']
-        end = seg['end']
-        # clip = video.subclip(start, end).fadein(fade_duration).fadeout(fade_duration)
-        # clips.append(clip)
+        start, end = seg['start'], seg['end']
         if start is not None and end is not None and start < end:
-            clip = video.subclip(start, end).fadein(fade_duration).fadeout(fade_duration)
+            clip = video.subclip(start, end).fadein(fade_duration).fadeout(fade_duration)  # Extract subclip with fades
             clips.append(clip)
-        else:
-            # logging.info(f"Skipping invalid segment: {seg}")
-            pass
-            
+
     if clips:
-        logging.info(f"Concatenating {len(clips)} sublips")
-        final_clip = concatenate_videoclips(clips, method="compose")
-        final_clip.write_videofile(output_video_path, codec="libx264", audio_codec="aac")
-        # If type error occurs the add below line of codes after lin no. 299 in VideoClip.py of moviepy library in video folder
+        logging.info(f"Concatenating {len(clips)} subclips")
+        final_clip = concatenate_videoclips(clips, method="compose")  # Concatenate all clips
+        final_clip.write_videofile(output_video_path, codec="libx264", audio_codec="aac")  # Export video
+        # IMPORTANT: If type error occurs the add below line of codes after line no. 299 in VideoClip.py of moviepy library in video folder
         # if fps is None:
         #     fps = self.fps
     else:
         logging.info("No segments to include in the edited video.")
 
+# Main pipeline
 def main():
-    # # Paths
-    # input_video = "animals.mp4"
-    # # User Query
-    # user_query = "Find the panda climbing down"
+    """
+    Pipeline for transcribing video, extracting relevant segments, and editing output video.
+    """
+    input_video = "your_video_file.mp4"  # Replace with your input video file path
+    user_query = "your prompt"  # Replace with your prompt(s)
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    device_name= torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'
-
-    # Step 1: Transcribe
+    # Step 1: Transcribe video
     logging.info("Transcribing video...")
-    model_name="tiny"
-    transcription = transcribe_video(input_video, model_name=model_name, device=device)
-    logging.info("Done!\n")
+    transcription = transcribe_video(input_video, model_name="tiny", device=device) 
     
-    logging.info("Getting relevant segments...")
-    # relevant_segments = get_relevant_segments(transcription, user_query)
-    chunks = split_transcript(transcription)
-    # logging.info(f"Total chunks: {len(chunks)}")
+    # Step2: Splitting transcript into chunks
+    logging.info("Splitting transcript into chunks...")
+    chunks = split_transcript(transcription)  # Chunk transcript
+    
+    # Step 3: Get relevant segments
+    all_segments = []
     for chunk in chunks:
-        relevant_segments = get_relevant_segments(chunk, user_query)
-    logging.info("Done!\n")
-    
-    # Step 5: Edit Video
-    if relevant_segments != None:
-        logging.info("Editing video...")
-        edit_video(input_video, relevant_segments)
+        relevant_segments = get_relevant_segments(chunk, user_query)  
+        if relevant_segments:
+            all_segments.extend(relevant_segments)
+
+    # Step 4: Edit video       
+    logging.info("Editing video...")
+    if all_segments:
+        edit_video(input_video, all_segments)  # Generate final edited video
         logging.info("Done!")
     else:
         logging.info("No relevant segments to edit.")
-        
-
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-device_name= torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'
 
 if __name__ == "__main__":
-    gc.collect()
-    torch.cuda.empty_cache()
-    
-    if torch.cuda.is_available():
-        logging.info(f"Available GPU: {device_name}\n")
-        with torch.device(device):
-            main()
-    else:
-        logging.info("No GPU available!\n")
-        main()  
+    gc.collect()  # Run garbage collection
+    torch.cuda.empty_cache()  # Empty CUDA cache
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'  # Determine device
+    device_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'
+
+    logging.info(f"Device in use: {device_name}")
+    main()
