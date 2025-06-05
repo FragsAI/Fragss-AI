@@ -1,1 +1,3 @@
-
+flash_attn -q timm -q
+-q supervision
+transformers==4.51.3
