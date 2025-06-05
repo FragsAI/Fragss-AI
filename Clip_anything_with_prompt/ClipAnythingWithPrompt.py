@@ -653,7 +653,7 @@ def main():
     and create highlight clips.
     """
     video_path = 'your_video.mp4'  # Path to the input video file
-    video_frames_batches_dir = '/video_frames'  # Directory where frames will be saved in batches
+    video_frames_batches_dir = '/video_frames'  # Directory where folder of frames will be saved in batches
     video_name = os.path.splitext(os.path.basename(video_path))[0]  # Extract the video name without the extension
     output_video_path = None
 
@@ -671,14 +671,14 @@ def main():
     )
 
     # Step 2: Load saved frames and their indices from the batch directories
-    all_frames, all_indices = fetch_frames_and_indices_from_batches(video_frames_batches_dir)
+    frames_and_indices_batches = fetch_frames_and_indices_from_batches(video_frames_batches_dir, video_path, True)
+    frames_batches, frame_indices_batches = frames_and_indices_batches[0], frames_and_indices_batches[1]
 
     # Step 3: User input text for finding relevant segments (e.g., a description)
     user_text_input = 'your prompt'
 
     # Step 4: Find video segments that match the user's prompt input by comparing it with captions generated from frames
-    matching_segments = find_object_segments(video_path, all_frames, all_indices, user_text_input)
-    matching_segments = [matching_segments] # Wrap the matching segments in a list
+    matching_segments = find_object_segments(video_path, frames_batches, frame_indices_batches, user_text_input)
 
     # Step 5: Edit the video by extracting the matching segments and creating a highlight video
     edit_video(video_path, matching_segments)  # Edit the video with the found segments and save the output
