@@ -39,10 +39,6 @@ warnings.filterwarnings('ignore')
 # Download stopwords if not already present
 # nltk.download('stopwords')
 
-# Check if stopwords are already present before downloading
-if not 'stopwords' in nltk.data.find('corpora/stopwords.zip'):
-    nltk.download('stopwords')
-
 # Configure logging to track progress and errors
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -531,7 +527,7 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
             print(f" Error during inference: {e}")
 
         finally:
-            progress_bar.update(len(batch_frames_list))
+            progress_bar.update(len(frames_batches))
         batch_num += 1
 
     progress_bar.close()
@@ -541,15 +537,6 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
       plot_bbox(start_frame, start_results['<CAPTION_TO_PHRASE_GROUNDING>'])
       print(f'End frame no. {end_index}')
       plot_bbox(end_frame, end_results['<CAPTION_TO_PHRASE_GROUNDING>'])
-        # for seg, vis in zip(segments, segment_visuals):
-        #     plot_start_end_bbox_side_by_side(
-        #         vis['start_frame'],
-        #         vis['end_frame'],
-        #         vis['start_index'],
-        #         vis['end_index'],
-        #         vis['start_results'],
-        #         vis['end_results']
-        #     )
 
     return segments
 
