@@ -467,7 +467,6 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
     }
 
     segments = []
-    segment_visuals = []
     match_started = False
     current_detail_level = detail_level
     batch_num = 0
