@@ -207,7 +207,8 @@ def fetch_frames_and_indices_from_batches(base_dir, video_path, batches=True):
         return [all_frames], [all_indices]
 
 # Load Florence-2 model for vision-language tasks
-# ! mkdir my_models/Florence_2 # Ceates folder/directory named 'my_models' and sub folder Florence_2 where florence2 models can be saved (e.g., Florence-2-large)
+# !mkdir -p my_models # Ceates folder/directory named 'my_models'
+# ! mkdir my_models/Florence_2  # and sub folder Florence_2 where florence2 models can be saved (e.g., Florence-2-large)
 florence_models_dir = 'my_models/Florence_2'
 model_id = 'microsoft/Florence-2-large'
 
