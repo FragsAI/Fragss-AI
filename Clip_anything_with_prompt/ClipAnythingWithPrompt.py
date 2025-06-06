@@ -328,6 +328,38 @@ def compare_texts(user_text_input, caption_text_input):
 
     return match_percent
 
+def get_timestamp_by_index(video_path, target_index):
+    """
+    Returns timestamp (in seconds) for a specific frame index.
+
+    Args:
+        video_path (str): Path to the video file.
+        target_index (int): Frame index to fetch the timestamp for.
+
+    Returns:
+        float: Timestamp in seconds, or None if the index is invalid.
+    """
+    cap = cv2.VideoCapture(video_path)
+    frame_num = 0
+
+    logging.info(f"Extracting timestamp for frame {target_index}...")
+
+    while cap.isOpened():
+        frame_exists, _ = cap.read()
+        if not frame_exists:
+            break
+
+        if frame_num == target_index:
+            timestamp_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+            cap.release()
+            return round(timestamp_ms / 1000.0, 3)  # Convert to seconds with 3 decimals
+
+        frame_num += 1
+
+    cap.release()
+    logging.warning(f"Frame index {target_index} not found in video.")
+    return None
+
 def plot_bbox(image, data):
     """
     Plots bounding boxes on a given image with label annotations. This function is useful for grounding tasks
@@ -401,9 +433,6 @@ def draw_polygons(image, prediction, fill_mask=False):
 
     display(image)
 
-# def find_object_segments_v3(video_path, frames_batches, frame_indices_batches, user_text_input,
-#                          detail_level='high', thresholds=np.array([85, 90, 95], dtype=np.float32),
-#                          plot_matching_frames=False, batch_size=5):
 def find_object_segments(video_path, frames_batches, frame_indices_batches, user_text_input,
                          detail_level='high', thresholds=np.array([85, 90, 95], dtype=np.float32),
                          plot_matching_frames=False):  
@@ -495,31 +524,13 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
                       plot_bbox(start_frame, start_results['<CAPTION_TO_PHRASE_GROUNDING>'])
                       print(f'End frame no. {end_index}')
                       plot_bbox(end_frame, end_results['<CAPTION_TO_PHRASE_GROUNDING>'])
-                      # for seg, vis in zip(segments, segment_visuals):
-                      #     plot_start_end_bbox_side_by_side(
-                      #         vis['start_frame'],
-                      #         vis['end_frame'],
-                      #         vis['start_index'],
-                      #         vis['end_index'],
-                      #         vis['start_results'],
-                      #         vis['end_results']
-                      #     )
+
                     match_started = False
                     user_input = input(" Do you want to continue finding more segments? (yes/no): ")
                     if user_input.lower() != 'yes':
                         progress_bar.update(len(batch_frames_list))
                         progress_bar.close()
                         print(f"Inference ended at frame no. {end_index}, batch {batch_num}")
-                        # if plot_matching_frames:
-                        #     for seg, vis in zip(segments, segment_visuals):
-                        #         plot_start_end_bbox_side_by_side(
-                        #             vis['start_frame'],
-                        #             vis['end_frame'],
-                        #             vis['start_index'],
-                        #             vis['end_index'],
-                        #             vis['start_results'],
-                        #             vis['end_results']
-                        #         )
 
                         return segments
 
@@ -539,39 +550,6 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
       plot_bbox(end_frame, end_results['<CAPTION_TO_PHRASE_GROUNDING>'])
 
     return segments
-
-
-def get_timestamp_by_index(video_path, target_index):
-    """
-    Returns timestamp (in seconds) for a specific frame index.
-
-    Args:
-        video_path (str): Path to the video file.
-        target_index (int): Frame index to fetch the timestamp for.
-
-    Returns:
-        float: Timestamp in seconds, or None if the index is invalid.
-    """
-    cap = cv2.VideoCapture(video_path)
-    frame_num = 0
-
-    logging.info(f"Extracting timestamp for frame {target_index}...")
-
-    while cap.isOpened():
-        frame_exists, _ = cap.read()
-        if not frame_exists:
-            break
-
-        if frame_num == target_index:
-            timestamp_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
-            cap.release()
-            return round(timestamp_ms / 1000.0, 3)  # Convert to seconds with 3 decimals
-
-        frame_num += 1
-
-    cap.release()
-    logging.warning(f"Frame index {target_index} not found in video.")
-    return None
 
 # Utility function
 def edit_paths(file_path):
