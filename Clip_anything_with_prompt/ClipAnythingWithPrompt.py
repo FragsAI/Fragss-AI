@@ -310,6 +310,8 @@ def compare_texts(user_text_input, caption_text_input):
       match_percent = (match_count / total_caption_words) * 100
     elif total_caption_words > 0 and total_caption_words > total_user_words:
       match_percent = (match_count / total_user_words) * 100
+    elif total_caption_words > 0 and total_user_words == total_caption_words:   
+      match_percent = (match_count / total_user_words) * 100        
     else:
       match_percent = 0
     match_percent = round(match_percent,2)  
