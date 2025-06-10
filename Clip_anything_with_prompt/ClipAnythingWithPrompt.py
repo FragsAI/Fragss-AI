@@ -293,36 +293,39 @@ def compare_texts(user_text_input, caption_text_input):
                Returns 0 if no matches are found.
     """
     # Clean and tokenize both inputs
-    user_words = clean_text(user_text_input) 
+    user_words = clean_text(user_text_input)
     caption_words = clean_text(caption_text_input)
 
-    # Find number of matched words
-    matched_words = user_words.intersection(caption_words) # Find matching/common words
-    matched_words = list(matched_words)
-    match_count = len(matched_words) # Total no.of matching/common words
     total_user_words = len(user_words) # Total user tokens/words
     total_caption_words = len(caption_words) # Total caption tokens/words
 
+    # Find number of matched words
+    # matched_words =  user_words.intersection(caption_words) # Find matching/common words
+    matched_words =  user_words.intersection(caption_words) if total_user_words > total_caption_words else caption_words.intersection(user_words) # Find matching/common words
+    matched_words = list(matched_words)
+    match_count = len(matched_words) # Total no.of matching/common words
+
     # Calculate match percentage
     if total_user_words > 0 and total_user_words > total_caption_words:
-      match_percent = (match_count / total_caption_words) * 100 
+      match_percent = (match_count / total_caption_words) * 100
     elif total_caption_words > 0 and total_caption_words > total_user_words:
       match_percent = (match_count / total_user_words) * 100
     else:
       match_percent = 0
+    match_percent = round(match_percent,2)  
 
     # Print result if there’s at least one match
     # if match_count > 0:
     #   if total_user_words < total_caption_words:
-    #     print(f"Matched {match_count} user words out of {total_user_words} caption words ({match_percent:.2f}%)")
+    #     print(f"Matched {match_count} common words out of {total_user_words} user words ({match_percent:.2f}%)")
     #   elif total_user_words > total_caption_words:
-    #     print(f"Matched {match_count} caption words out of {total_caption_words} user words ({match_percent:.2f}%)")
+    #     print(f"Matched {match_count} common words out of {total_caption_words} caption words ({match_percent:.2f}%)")
     #   # print(f"caption text input: {caption_text_input}")
     #   # print(f"user prompt: {user_text_input}")
     #   print(f"Caption tokens: {sorted(caption_words)}")
     #   print(f"User tokens: {sorted(user_words)}")
     #   print(f"Matched words: {sorted(matched_words)}")
-      
+
     # else:
     #   print('Zero matched words')
 
