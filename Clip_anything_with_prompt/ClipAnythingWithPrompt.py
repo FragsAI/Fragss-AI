@@ -652,7 +652,7 @@ def main():
     matching_segments = find_object_segments(video_path, frames_batches, frame_indices_batches, user_text_input)
 
     # Step 5: Edit the video by extracting the matching segments and creating a highlight video
-    edit_video(video_path, matching_segments)  # Edit the video with the found segments and save the output
+    edit_video(video_path, matching_segments, output_video_path)  # Edit the video with the found segments and save the output
 
 # Entry point
 if __name__ == '__main__':
