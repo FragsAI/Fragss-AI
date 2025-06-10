@@ -625,7 +625,8 @@ def main():
     video_path = 'your_video.mp4'  # Path to the input video file
     video_frames_batches_dir = '/video_frames'  # Directory where folder of frames will be saved in batches
     video_name = os.path.splitext(os.path.basename(video_path))[0]  # Extract the video name without the extension
-    output_video_path = None
+    output_video_path_to_edit = 'your_path_to_edited_clip.mp4' # or None
+    output_video_path = edit_paths(output_video_path_to_edit) if output_video_path_to_edit is not None else None
 
     sample_interval = adjust_sample_interval(video_path)  # Dynamically adjust the sample interval based on video length
     batch_size = determine_chunk_size()  # Dynamically adjust the batch size based on available system memory
