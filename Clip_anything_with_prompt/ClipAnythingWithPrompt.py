@@ -527,9 +527,10 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
 
                 if match_percent is not None and match_percent >= thresholds_dict[current_detail_level]:
                     if not match_started:
+                        print(f"\n {get_suffix(match_seg_count)} Match started")
+                        match_started = True
                         start_index = index
                         start_frame = frame
-                        match_started = True
                         start_results = run_florence2_inference(start_frame, '<CAPTION_TO_PHRASE_GROUNDING>', user_text_input)
 
                     end_index = index
@@ -541,16 +542,8 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
                         'start': get_timestamp_by_index(video_path, start_index),
                         'end': get_timestamp_by_index(video_path, end_index)
                     })
-
-                    segment_visuals.append({
-                        'start_frame': start_frame,
-                        'end_frame': end_frame,
-                        'start_results': start_results,
-                        'end_results': end_results,
-                        'start_index': start_index,
-                        'end_index': end_index
-                    })
-                    print(f" First matching segment found at frame no. {start_index} in btach no. {batch_num}\n Start: {segments[-1]['start']}, End: {segments[-1]['end']} | Start frame index: {start_index} End frame index: {end_index}")
+                    print(f" Ended")
+                    print(f"  {get_suffix(match_seg_count)} matching segment found at frame no. {start_index} in btach no. {batch_num}\n Start: {segments[-1]['start']}, End: {segments[-1]['end']} | Start frame index: {start_index} End frame index: {end_index}")
                     if plot_matching_frames:
                       print(f'Start frame no. {start_index}')
                       plot_bbox(start_frame, start_results['<CAPTION_TO_PHRASE_GROUNDING>'])
@@ -558,7 +551,7 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
                       plot_bbox(end_frame, end_results['<CAPTION_TO_PHRASE_GROUNDING>'])
 
                     match_started = False
-                    user_input = input(" Do you want to continue finding more segments? (yes/no): ")
+                    user_input = input("\n Do you want to continue finding more segments? (yes/no): ")
                     if user_input.lower() != 'yes':
                         progress_bar.update(len(batch_frames_list))
                         progress_bar.close()
@@ -574,13 +567,13 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
         batch_num += 1
 
     progress_bar.close()
-    print(f"Inference ended at frame no. {end_index}, batch {batch_num}")
     if plot_matching_frames:
       print(f'Start frame no. {start_index}')
       plot_bbox(start_frame, start_results['<CAPTION_TO_PHRASE_GROUNDING>'])
       print(f'End frame no. {end_index}')
       plot_bbox(end_frame, end_results['<CAPTION_TO_PHRASE_GROUNDING>'])
-
+    print(f"Inference ended at frame no. {end_index}, batch {batch_num}") 
+                             
     return segments
 
 # version 2
