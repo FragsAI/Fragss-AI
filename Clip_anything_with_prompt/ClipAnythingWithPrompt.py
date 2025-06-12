@@ -501,6 +501,7 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
 
     segments = []
     match_started = False
+    match_seg_count = 0                         
     current_detail_level = detail_level
     batch_num = 0
 
@@ -529,6 +530,7 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
                     if not match_started:
                         print(f"\n {get_suffix(match_seg_count)} Match started")
                         match_started = True
+                        match_seg_count += 1
                         start_index = index
                         start_frame = frame
                         start_results = run_florence2_inference(start_frame, '<CAPTION_TO_PHRASE_GROUNDING>', user_text_input)
@@ -545,9 +547,9 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
                     print(f" Ended")
                     print(f"  {get_suffix(match_seg_count)} matching segment found at frame no. {start_index} in btach no. {batch_num}\n Start: {segments[-1]['start']}, End: {segments[-1]['end']} | Start frame index: {start_index} End frame index: {end_index}")
                     if plot_matching_frames:
-                      print(f'Start frame no. {start_index}')
+                      print(f' Start frame no. {start_index}')
                       plot_bbox(start_frame, start_results['<CAPTION_TO_PHRASE_GROUNDING>'])
-                      print(f'End frame no. {end_index}')
+                      print(f' End frame no. {end_index}')
                       plot_bbox(end_frame, end_results['<CAPTION_TO_PHRASE_GROUNDING>'])
 
                     match_started = False
@@ -568,9 +570,9 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
 
     progress_bar.close()
     if plot_matching_frames:
-      print(f'Start frame no. {start_index}')
+      print(f' Start frame no. {start_index}')
       plot_bbox(start_frame, start_results['<CAPTION_TO_PHRASE_GROUNDING>'])
-      print(f'End frame no. {end_index}')
+      print(f' End frame no. {end_index}')
       plot_bbox(end_frame, end_results['<CAPTION_TO_PHRASE_GROUNDING>'])
     print(f"Inference ended at frame no. {end_index}, batch {batch_num}") 
                              
