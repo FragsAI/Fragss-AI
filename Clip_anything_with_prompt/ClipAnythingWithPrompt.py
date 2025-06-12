@@ -811,7 +811,11 @@ def main():
     user_text_input = 'your prompt'
 
     # Step 4: Find video segments that match the user's prompt input by comparing it with captions generated from frames
-    matching_segments = find_object_segments(video_path, frames_batches, frame_indices_batches, user_text_input)
+    #(Use  `find_object_segments` or `find_object_segments_v2` as per your convenience, recommended: `find_object_segments_v2`)
+    # use version 1
+    # matching_segments = find_object_segments(video_path, frames_batches, frame_indices_batches, user_text_input)
+    # use vesrion 2
+    matching_segments = find_object_segments_v2(video_path, user_text_input, sample_interval=sample_interval)
 
     # Step 5: Edit the video by extracting the matching segments and creating a highlight video
     edit_video(video_path, matching_segments, output_video_path)  # Edit the video with the found segments and save the output
