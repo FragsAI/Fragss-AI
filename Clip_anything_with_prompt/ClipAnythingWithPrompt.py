@@ -775,7 +775,7 @@ def edit_paths(file_path):
 
     return edited_path
 
-def edit_video(original_video_path, segments, output_video_path=None, fade_duration=0.5):
+def edit_video(original_video_path, segments, output_video_path=None, fade_duration=0):
     """
     Extracts and concatenates video clips from relevant segments.
 
