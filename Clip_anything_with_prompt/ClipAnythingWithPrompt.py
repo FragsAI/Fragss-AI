@@ -568,10 +568,12 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
                         start_index = index
                         start_frame = frame
                         start_results = run_florence2_inference(start_frame, '<CAPTION_TO_PHRASE_GROUNDING>', user_text_input)
+                        start_frame_bbox_labels = start_results['<CAPTION_TO_PHRASE_GROUNDING>']
 
                     end_index = index
                     end_frame = frame
                     end_results = run_florence2_inference(end_frame, '<CAPTION_TO_PHRASE_GROUNDING>', user_text_input)
+                    end_frame_bbox_labels=end_results['<CAPTION_TO_PHRASE_GROUNDING>']
 
                 elif match_started:
                     segments.append({
