@@ -392,35 +392,6 @@ def get_timestamp_by_index(video_path, target_index):
     logging.warning(f"Frame index {target_index} not found in video.")
     return None
 
-def plot_bbox(image, data):
-    """
-    Plots bounding boxes on a given image with label annotations. This function is useful for grounding tasks
-    where object detection results are visualized on the image.
-
-    Args:
-        image (PIL.Image): The image on which the bounding boxes will be plotted. It should be a PIL Image object.
-        data (dict): A dictionary containing bounding box and label information.
-                     The dictionary should have the following keys:
-                     - 'bboxes' (list of tuples): List of bounding boxes, where each box is defined by a
-                                                   tuple (x1, y1, x2, y2) representing the top-left and
-                                                   bottom-right corners of the box.
-                     - 'labels' (list of str): List of labels corresponding to each bounding box in 'bboxes'.
-    Returns:
-        None: The function modifies the `image` object in place by drawing bounding boxes and labels. It does not
-              return any value.
-    """
-    fig, ax = plt.subplots()
-    ax.imshow(image)
-
-    for bbox, label in zip(data['bboxes'], data['labels']):
-        x1, y1, x2, y2 = bbox
-        rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1, edgecolor='r', facecolor='none')
-        ax.add_patch(rect)
-        plt.text(x1, y1, label, color='white', fontsize=8, bbox=dict(facecolor='red', alpha=0.5))
-
-    ax.axis('off')
-    plt.show()
-
 # Define a colormap for drawing annotations
 colormap = ['blue','orange','green','purple','brown','pink','gray','olive','cyan','red',
             'lime','indigo','violet','aqua','magenta','coral','gold','tan','skyblue']
@@ -465,6 +436,69 @@ def draw_polygons(image, prediction, fill_mask=False):
 
     display(image)
 
+def plot_bbox(image, data):
+    """
+    Plots bounding boxes on a given image with label annotations. This function is useful for grounding tasks
+    where object detection results are visualized on the image.
+
+    Args:
+        image (PIL.Image): The image on which the bounding boxes will be plotted. It should be a PIL Image object.
+        data (dict): A dictionary containing bounding box and label information.
+                     The dictionary should have the following keys:
+                     - 'bboxes' (list of tuples): List of bounding boxes, where each box is defined by a
+                                                   tuple (x1, y1, x2, y2) representing the top-left and
+                                                   bottom-right corners of the box.
+                     - 'labels' (list of str): List of labels corresponding to each bounding box in 'bboxes'.
+    Returns:
+        None: The function modifies the `image` object in place by drawing bounding boxes and labels. It does not
+              return any value.
+    """
+    fig, ax = plt.subplots()
+    ax.imshow(image)
+
+    for bbox, label in zip(data['bboxes'], data['labels']):
+        x1, y1, x2, y2 = bbox
+        rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1, edgecolor='r', facecolor='none')
+        ax.add_patch(rect)
+        plt.text(x1, y1, label, color='white', fontsize=8, bbox=dict(facecolor='red', alpha=0.5))
+
+    ax.axis('off')
+    plt.show()
+
+def plot_bbox_pair(images, data_list, titles=('Image 1', 'Image 2'), main_title='Bounding Boxes Comparison'):
+    """
+    Plot two images side by side with bounding boxes and labels.
+
+    Args:
+        images (list): List of 2 images (numpy arrays or PIL images).
+        data_list (list): List of 2 dictionaries, each with 'bboxes' and 'labels'.
+        titles (tuple): Titles for the two subplots.
+        main_title (str): Main title displayed above the figure.
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(13, 11))
+
+    for i, (image, data, title) in enumerate(zip(images, data_list, titles)):
+        ax = axes[i]
+        ax.imshow(image)
+
+        for bbox, label in zip(data['bboxes'], data['labels']):
+            x1, y1, x2, y2 = bbox
+            rect = patches.Rectangle((x1, y1), x2 - x1, y2 - y1,
+                                     linewidth=1, edgecolor='r', facecolor='none')
+            ax.add_patch(rect)
+            ax.text(x1, y1, label, color='white', fontsize=8,
+                    bbox=dict(facecolor='red', alpha=0.5))
+
+        ax.set_title(title)
+        ax.axis('off')
+
+    # Add the main title in green
+    plt.suptitle(main_title, color='darkgreen', fontsize=16)
+    # fig.suptitle(main_title, color='darkgreen', fontsize=16)
+
+    plt.tight_layout(rect=[0, 0, 1, 1.6])  # (left, bottom, right, top) Leave space for suptitle
+    plt.show()
+    
 # version 1
 def find_object_segments(video_path, frames_batches, frame_indices_batches, user_text_input,
                          detail_level='high', thresholds=np.array([85, 90, 95], dtype=np.float32),
@@ -547,17 +581,17 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
                     print(f" Ended")
                     print(f"  {get_suffix(match_seg_count)} matching segment found at frame no. {start_index} in btach no. {batch_num}\n Start: {segments[-1]['start']}, End: {segments[-1]['end']} | Start frame index: {start_index} End frame index: {end_index}")
                     if plot_matching_frames:
-                      print(f' Start frame no. {start_index}')
-                      plot_bbox(start_frame, start_results['<CAPTION_TO_PHRASE_GROUNDING>'])
-                      print(f' End frame no. {end_index}')
-                      plot_bbox(end_frame, end_results['<CAPTION_TO_PHRASE_GROUNDING>'])
+                       plot_bbox_pair(images=[start_frame, end_frame],
+                                      data_list=[start_frame_bbox_labels, end_frame_bbox_labels],
+                                      titles=(f'Start frame no. {start_index}', f'End frame no. {end_index}'),
+                                      main_title=f'{get_suffix(match_seg_count)} matching segment')
 
                     match_started = False
                     user_input = input("\n Do you want to continue finding more segments? (yes/no): ")
                     if user_input.lower() != 'yes':
                         progress_bar.update(len(batch_frames_list))
                         progress_bar.close()
-                        print(f"Inference ended at frame no. {end_index}, batch {batch_num}")
+                        print(f"Inference ended at frame no. {end_index}, batch {batch_num}. \033[1m{len(segments)}\033[0m matching segments found.")
 
                         return segments
 
@@ -570,11 +604,11 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
 
     progress_bar.close()
     if plot_matching_frames:
-      print(f' Start frame no. {start_index}')
-      plot_bbox(start_frame, start_results['<CAPTION_TO_PHRASE_GROUNDING>'])
-      print(f' End frame no. {end_index}')
-      plot_bbox(end_frame, end_results['<CAPTION_TO_PHRASE_GROUNDING>'])
-    print(f"Inference ended at frame no. {end_index}, batch {batch_num}") 
+       plot_bbox_pair(images=[start_frame, end_frame],
+                      data_list=[start_frame_bbox_labels, end_frame_bbox_labels],
+                      titles=(f'Start frame no. {start_index}', f'End frame no. {end_index}'),
+                      main_title=f'{get_suffix(match_seg_count)} matching segment')
+    print(f"Inference ended at frame no. {end_index}, batch {batch_num}. \033[1m{len(segments)}\033[0m matching segments found.")
                              
     return segments
 
@@ -674,22 +708,22 @@ def find_object_segments_v2(video_path, user_text_input,
                     'start': get_timestamp_by_index(video_path, start_index),
                     'end': get_timestamp_by_index(video_path, end_index)
                 })
-                print(f" {get_suffix(match_seg_count)} matching segment Start: {segments[-1]['start']}, End: {segments[-1]['end']} | Start frame index: {start_index} End frame index: {end_index}\n")
-                
+                print(f" {get_suffix(match_seg_count)} matching segment Start: {segments[-1]['start']}, End: {segments[-1]['end']} | Start frame index: {start_index} End frame index: {end_index}")
+
                 if plot_matching_frames:
-                    print(f" Start Frame no.{start_index}")
-                    plot_bbox(start_frame, start_results['<CAPTION_TO_PHRASE_GROUNDING>'])
-                    print(f" End Frame no. {end_index}")
-                    plot_bbox(end_frame, end_results['<CAPTION_TO_PHRASE_GROUNDING>'])
+                    plot_bbox_pair(images=[start_frame, end_frame],
+                                    data_list=[start_frame_bbox_labels, end_frame_bbox_labels],
+                                    titles=(f'Start frame no. {start_index}', f'End frame no. {end_index}'),
+                                    main_title=f'{get_suffix(match_seg_count)} matching segment')
 
                 match_started = False
                 user_input = input("\n Do you want to continue finding more segments? (yes/no): ")
                 if user_input.lower() != 'yes':
                     pbar.close()
-                    print(f"Inference ended at frame no. {end_index}\n")
+                    print(f"Inference ended at frame no. {end_index}. \033[1m{len(segments)}\033[0m matching segments found.")
                     break
                 else:
-                  print('Inference on...')
+                  print(' Inference on...')
                   
         frame_index += sample_interval
         pbar.update(sample_interval)
@@ -700,13 +734,13 @@ def find_object_segments_v2(video_path, user_text_input,
             'start': get_timestamp_by_index(video_path, start_index),
             'end': get_timestamp_by_index(video_path, end_index)
         })
-        print(f"  {get_suffix(match_seg_count)} matching segment:\n Start: {segments[-1]['start']}, End: {segments[-1]['end']} | Start frame index: {start_index} End frame index: {end_index}\n")     
+        print(f"  {get_suffix(match_seg_count)} matching segment: Start: {segments[-1]['start']}, End: {segments[-1]['end']} | Start frame index: {start_index} End frame index: {end_index}")
         if plot_matching_frames:
-          print(f" Start Frame no. {start_index}")
-          plot_bbox(start_frame, start_results['<CAPTION_TO_PHRASE_GROUNDING>'])
-          print(f" End Frame no. {end_index}")
-          plot_bbox(end_frame, end_results['<CAPTION_TO_PHRASE_GROUNDING>'])
-        print(f"Inference ended at frame no. {end_index}.\n")  
+           plot_bbox_pair(images=[start_frame, end_frame],
+                          data_list=[start_frame_bbox_labels, end_frame_bbox_labels],
+                          titles=(f'Start frame no. {start_index}', f'End frame no. {end_index}'),
+                          main_title=f'{get_suffix(match_seg_count)} matching segment')
+        print(f"Inference ended at frame no. {end_index}. \033[1m{len(segments)}\033[0m matching segments found.") 
 
     cap.release()
     pbar.close()
