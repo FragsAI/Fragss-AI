@@ -581,7 +581,7 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
                         'end': get_timestamp_by_index(video_path, end_index)
                     })
                     print(f" Ended")
-                    print(f"  {get_suffix(match_seg_count)} matching segment found at frame no. {start_index} in btach no. {batch_num}\n Start: {segments[-1]['start']}, End: {segments[-1]['end']} | Start frame index: {start_index} End frame index: {end_index}")
+                    print(f" {get_suffix(match_seg_count)} matching segment found at frame no. {start_index} in btach no. {batch_num}\n Start: {segments[-1]['start']}, End: {segments[-1]['end']} | Start frame index: {start_index} End frame index: {end_index}")
                     if plot_matching_frames:
                        plot_bbox_pair(images=[start_frame, end_frame],
                                       data_list=[start_frame_bbox_labels, end_frame_bbox_labels],
