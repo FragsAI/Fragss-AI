@@ -562,11 +562,11 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
 
                 if match_percent is not None and match_percent >= thresholds_dict[current_detail_level]:
                     if not match_started:
-                        print(f"\n {get_suffix(match_seg_count)} Match started")
                         match_started = True
                         match_seg_count += 1
                         start_index = index
                         start_frame = frame
+                        print(f"\n {get_suffix(match_seg_count)} Match started")
                         start_results = run_florence2_inference(start_frame, '<CAPTION_TO_PHRASE_GROUNDING>', user_text_input)
                         start_frame_bbox_labels = start_results['<CAPTION_TO_PHRASE_GROUNDING>']
 
