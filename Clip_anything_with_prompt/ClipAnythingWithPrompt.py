@@ -562,18 +562,18 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
 
                 if match_percent is not None and match_percent >= thresholds_dict[current_detail_level]:
                     if not match_started:
-                        match_started = True
-                        match_seg_count += 1
+                        # Find start frame and it's index along with bbox and labels (only once before a match starts)
                         start_index = index
                         start_frame = frame
+                        match_started = True
+                        match_seg_count += 1
                         print(f"\n {get_suffix(match_seg_count)} Match started")
                         start_results = run_florence2_inference(start_frame, '<CAPTION_TO_PHRASE_GROUNDING>', user_text_input)
                         start_frame_bbox_labels = start_results['<CAPTION_TO_PHRASE_GROUNDING>']
 
+                    # Keep updating end matching frame and it's index
                     end_index = index
                     end_frame = frame
-                    end_results = run_florence2_inference(end_frame, '<CAPTION_TO_PHRASE_GROUNDING>', user_text_input)
-                    end_frame_bbox_labels=end_results['<CAPTION_TO_PHRASE_GROUNDING>']
 
                 elif match_started:
                     segments.append({
@@ -582,6 +582,11 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
                     })
                     print(f" Ended")
                     print(f" {get_suffix(match_seg_count)} matching segment found at frame no. {start_index} in btach no. {batch_num}\n Start: {segments[-1]['start']}, End: {segments[-1]['end']} | Start frame index: {start_index} End frame index: {end_index}")
+
+                    # Find bbox and labels only for final end_frame 
+                    end_results = run_florence2_inference(end_frame, '<CAPTION_TO_PHRASE_GROUNDING>', user_text_input)
+                    end_frame_bbox_labels=end_results['<CAPTION_TO_PHRASE_GROUNDING>']
+                    
                     if plot_matching_frames:
                        plot_bbox_pair(images=[start_frame, end_frame],
                                       data_list=[start_frame_bbox_labels, end_frame_bbox_labels],
@@ -694,17 +699,21 @@ def find_object_segments_v2(video_path, user_text_input,
 
         if match_percent is not None and match_percent >= thresholds[current_detail_level]:
             if not match_started:
-                match_started = True
-                match_seg_count += 1
+                # Find start frame and it's index along with bbox and labels (only once before a match starts)
                 start_index = frame_index
                 start_frame = frame
+                match_started = True
+                match_seg_count += 1
                 print(f"\n {get_suffix(match_seg_count)} Match started")
                 start_results = run_florence2_inference(start_frame, '<CAPTION_TO_PHRASE_GROUNDING>', user_text_input)
+                start_frame_bbox_labels = start_results['<CAPTION_TO_PHRASE_GROUNDING>']
+            # Keep updating end matching frame and it's index
             end_index = frame_index
             end_frame = frame
         else:
             if match_started:
                 print(f" Ended")
+                # Find bbox and labels only for final end_frame
                 end_results = run_florence2_inference(end_frame, '<CAPTION_TO_PHRASE_GROUNDING>', user_text_input)
                 segments.append({
                     'start': get_timestamp_by_index(video_path, start_index),
