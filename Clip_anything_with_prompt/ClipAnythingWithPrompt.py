@@ -601,6 +601,8 @@ def find_object_segments(video_path, frames_batches, frame_indices_batches, user
                         print(f"Inference ended at frame no. {end_index}, batch {batch_num}. \033[1m{len(segments)}\033[0m matching segments found.")
 
                         return segments
+                    else:
+                      print(' Inference on...')    
 
         except (ValueError, AttributeError) as e:
             print(f" Error during inference: {e}")
